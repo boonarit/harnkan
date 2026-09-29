@@ -10,6 +10,9 @@ test('check จับความลับและข้อมูลส่ว�
     'secret: ' + 'abcdef0123456789abcdef0123456789',
     'โทร 081-234-5678',
     'บัญชี 123-4-56789-0',
+    'บัญชี 123-456-7890',
+    "bank_account: '1234567890'",
+    'bank_account=987 654 3210',
     'k=' + 'AI' + 'za' + 'SyA1234567890abcdefghijklmnopqrstuv',
     'GEMINI_API' + '_KEY=abc123',
   ]
@@ -18,6 +21,7 @@ test('check จับความลับและข้อมูลส่ว�
 
 test('check ปล่อยเบอร์ปลอมและ fixture สังเคราะห์', () => {
   assert.deepEqual(scanText('x.ts', 'พร้อมเพย์ 0800000001 และ 0800000002 ยอด 34750'), [])
+  assert.deepEqual(scanText('x.ts', "bank_account: '0000000001' · 000-000-0002 · 080-000-0001"), [])
   const files = ['test/fixtures/synthetic/a.png', 'docs/shot.png', '.env', '.env.example']
   const p = checkFiles(files, () => '')
   assert.deepEqual(p, ['docs/shot.png รูปนอก test/fixtures/synthetic/', '.env ไฟล์ env ห้าม commit'])

@@ -107,7 +107,7 @@ test('static: /app/ /domain/ เสิร์ฟได้ · path traversal → 4
     assert.match((await get('/app/main.js')).headers.get('content-type')!, /javascript/)
     assert.equal((await get('/domain/money.js')).status, 200)
     assert.equal((await get('/')).status, 302)
-    assert.deepEqual(await (await get('/app/config.json')).json(), { liffId: '', fake: true })
+    assert.deepEqual(await (await get('/app/config.json')).json(), { liffId: '', fake: true, version: (await import('../src/static.ts')).assetVersion() })
     for (const p of ['/app/../package.json', '/app/%2e%2e/package.json', '/domain/../config.ts', '/domain/..%2Fconfig.ts', '/app/data/../../../src/config.ts', '/app/missing.js', '/domain/parse.ts'])
       assert.equal((await get(p)).status, 404, p)
   } finally {

@@ -4,7 +4,21 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 import type { DatabaseSync } from 'node:sqlite'
 import { log } from '../log.ts'
 
-const NAME = /^harnkan-\d{8}-\d{6}\.db\.gz$/
+// ชื่อใหม่ (B18) เป็นเวลาไทย + "+07" · ชื่อเก่า (ไม่มี offset) เป็น UTC — การเรียงเพื่อลบชุดเก่าต้องแปลงเป็นเวลาจริงก่อน
+const NAME = /^harnkan-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(\+07)?\.db\.gz$/
+
+/** ชื่อไฟล์สำรอง → epoch ms (null = ไม่ใช่ไฟล์สำรอง) */
+export function backupTime(name: string): number | null {
+  const m = name.match(NAME)
+  if (!m) return null
+  return Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7] ? '+07:00' : 'Z'}`)
+}
+
+/** epoch ms → ชื่อไฟล์เวลาไทย เช่น harnkan-20260930-015035+07.db.gz */
+export function backupName(now: number) {
+  const stamp = new Date(now + 7 * 3600_000).toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15)
+  return `harnkan-${stamp}+07.db.gz`
+}
 
 /**
  * สำรอง DB: VACUUM INTO (ได้ snapshot ที่ consistent แม้ bot เขียนอยู่) → gzip → BACKUP_DIR
@@ -12,9 +26,9 @@ const NAME = /^harnkan-\d{8}-\d{6}\.db\.gz$/
  */
 export function runBackup(db: DatabaseSync, backupDir: string, keep: number, now = Date.now()) {
   mkdirSync(backupDir, { recursive: true })
-  const stamp = new Date(now).toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15)
-  const raw = join(backupDir, `.tmp-${stamp}.db`)
-  const out = join(backupDir, `harnkan-${stamp}.db.gz`)
+  const name = backupName(now)
+  const raw = join(backupDir, `.tmp-${name}.db`)
+  const out = join(backupDir, name)
   rmSync(raw, { force: true })
   try {
     db.exec(`VACUUM INTO '${raw.replace(/'/g, "''")}'`)
@@ -25,7 +39,7 @@ export function runBackup(db: DatabaseSync, backupDir: string, keep: number, now
   } finally {
     rmSync(raw, { force: true })
   }
-  const all = readdirSync(backupDir).filter((f) => NAME.test(f)).sort()
+  const all = readdirSync(backupDir).filter((f) => NAME.test(f)).sort((a, b) => backupTime(a)! - backupTime(b)! || a.localeCompare(b))
   const removed = all.slice(0, Math.max(0, all.length - keep))
   for (const f of removed) rmSync(join(backupDir, f))
   log.info('backup_done', { file: out, kept: all.length - removed.length, removed: removed.length })

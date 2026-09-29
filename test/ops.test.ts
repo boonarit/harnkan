@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { gunzipSync } from 'node:zlib'
 import { handlers } from '../src/bot.ts'
 import { health } from '../src/health.ts'
-import { runBackup } from '../src/jobs/backup.ts'
+import { backupName, backupTime, runBackup } from '../src/jobs/backup.ts'
 import { runRetention } from '../src/jobs/retention.ts'
 import { runSummary } from '../src/jobs/summary.ts'
 import { handleEvent } from '../src/line/router.ts'
@@ -43,7 +43,7 @@ test('backup: gzip ของ SQLite ที่เปิดได้ · เก็�
   for (let i = 0; i < 9; i++) runBackup(repo.db, dir, 7, t0 + i * 86400_000)
   const files = readdirSync(dir).sort()
   assert.equal(files.length, 7)
-  assert.equal(files[0], 'harnkan-20260903-040000.db.gz')
+  assert.equal(files[0], 'harnkan-20260903-110000+07.db.gz', 'ชื่อเป็นเวลาไทย (04:00 UTC = 11:00 ไทย)')
   const restored = join(tmpDir(), 'r.db')
   writeFileSync(restored, gunzipSync(readFileSync(join(dir, files.at(-1)!))))
   const db = new DatabaseSync(restored)
@@ -120,4 +120,19 @@ test('healthz: stale เมื่อไม่มีรายการเกิ�
   // ไม่มีรายการเกิน 3 วัน
   t.clock.t = Date.parse('2026-10-03T12:00:00+07:00')
   assert.match(health(t.ctx).reasons.join(), /ไม่มีรายการใหม่เกิน 3 วัน/)
+})
+
+test('backup (B18): ชื่อเวลาไทย +07 · ลบชุดเก่าเรียงตามเวลาจริงแม้ชื่อแบบเก่า (UTC) กับแบบใหม่ปนกัน', () => {
+  assert.equal(backupName(Date.parse('2026-09-29T18:50:35Z')), 'harnkan-20260930-015035+07.db.gz')
+  assert.equal(backupTime('harnkan-20260930-015035+07.db.gz'), backupTime('harnkan-20260929-185035.db.gz'))
+  assert.equal(backupTime('harnkan-x.db.gz'), null)
+  const { repo } = seeded()
+  const dir = join(tmpDir(), 'backups')
+  mkdirSync(dir, { recursive: true })
+  // negative control: เรียงตามตัวอักษร ไฟล์ใหม่ (+07) ดูใหม่กว่า แต่เวลาจริงไฟล์ชื่อเก่า 20:00 UTC (= 03:00 ไทยวันที่ 30) ใหม่กว่า
+  writeFileSync(join(dir, 'harnkan-20260929-200000.db.gz'), 'old-but-newer')
+  writeFileSync(join(dir, 'harnkan-20260930-010000+07.db.gz'), 'new-but-older')
+  writeFileSync(join(dir, 'harnkan-20260928-120000.db.gz'), 'oldest')
+  runBackup(repo.db, dir, 2, Date.parse('2026-09-30T04:00:00Z'))
+  assert.deepEqual(readdirSync(dir).sort(), ['harnkan-20260929-200000.db.gz', 'harnkan-20260930-110000+07.db.gz'])
 })

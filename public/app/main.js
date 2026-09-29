@@ -229,16 +229,17 @@ async function viewSettle() {
       <div class="big" data-testid="settle-amount">${baht(p.amount)}</div>
       <div class="who">${name(p.from)} โอนให้ ${name(p.to)}</div>
     </section>
-    ${qr ? `<img class="qr" src="${qr}" alt="QR พร้อมเพย์ ${baht(p.amount)}">` : `<div class="qr-placeholder">${pp ? 'QR แสดงเมื่อต่อ server จริง' : `${name(p.to)} ยังไม่ได้ตั้งเบอร์พร้อมเพย์<br><a href="#/settings">ไปตั้งค่า</a>`}</div>`}
+    ${qr ? `<img class="qr" src="${qr}" alt="QR พร้อมเพย์ ${baht(p.amount)}">` : p.bank_account ? `<div class="account" data-testid="account">โอนเข้า ${esc(p.bank_name ?? 'บัญชี')}<br><b>${esc(p.bank_account)}</b></div>` : `<div class="qr-placeholder">${pp ? 'QR แสดงเมื่อต่อ server จริง' : `${name(p.to)} ยังไม่ได้ตั้งเบอร์พร้อมเพย์หรือเลขบัญชี<br><a href="#/settings">ไปตั้งค่า</a>`}</div>`}
     <div class="actions">
       ${qr ? `<a class="btn secondary" href="${qr}" download="harnkan-qr.png">บันทึกรูป QR</a>` : ''}
       ${pp ? `<button type="button" class="secondary" data-copy="${esc(pp)}">คัดลอกเบอร์ ${esc(pp)}</button>` : ''}
+      ${!qr && !pp && p.bank_account ? `<button type="button" class="secondary" data-copy="${esc(p.bank_account)}">คัดลอกเลขบัญชี</button>` : ''}
     </div>
-    <h2>วิธีสแกน</h2>
+    ${qr ? `<h2>วิธีสแกน</h2>
     <ol class="steps">
       <li><b>มือถือเครื่องเดียว:</b> กด "บันทึกรูป QR" → เปิดแอปธนาคาร → สแกน → เลือกรูปจากคลังภาพ</li>
       <li><b>สองเครื่อง:</b> เปิดหน้านี้ค้างไว้ แล้วใช้แอปธนาคารอีกเครื่องสแกนจากจอ</li>
-    </ol>
+    </ol>` : ''}
     <p class="muted">โอนแล้วส่งสลิปในกลุ่ม LINE บอทจะปิดยอดให้</p>
     <h2>เคลียร์กันนอกแอปแล้ว?</h2>
     <p class="muted">ปิดยอดให้เป็น 0 โดยไม่ต้องส่งสลิป · ประวัติยังอยู่ครบ ลบทีหลังได้ (ยอดจะกลับมา)</p>
@@ -324,6 +325,9 @@ async function viewSettings() {
       <p class="field-error" id="display_name-error" role="alert" hidden></p>
       <label for="promptpay_id">เบอร์พร้อมเพย์ (รับเงิน)</label><input id="promptpay_id" inputmode="numeric" placeholder="เบอร์มือถือ 10 หลัก" aria-describedby="promptpay_id-help" value="${esc(mine.promptpay_id ?? '')}">
       <p class="help" id="promptpay_id-help">ใช้สร้าง QR ตอนสรุป ถ้าบัญชีไม่ผูกพร้อมเพย์ให้เว้นว่าง</p>
+      <label for="bank_name">ธนาคาร (ถ้าไม่มีพร้อมเพย์)</label><input id="bank_name" maxlength="30" placeholder="เช่น กสิกร" value="${esc(mine.bank_name ?? '')}">
+      <label for="bank_account">เลขบัญชีรับเงิน (ถ้าไม่มีพร้อมเพย์)</label><input id="bank_account" inputmode="numeric" aria-describedby="bank_account-help" value="${esc(mine.bank_account ?? '')}">
+      <p class="help" id="bank_account-help">การ์ดสรุปจะแสดงเลขนี้ + ปุ่มคัดลอกแทน QR · เก็บในฐานข้อมูลของคู่เท่านั้น</p>
       <label for="bank_names">ชื่อบัญชีตามสลิป</label><input id="bank_names" placeholder="เช่น สมชาย" aria-describedby="bank_names-help" value="${esc((mine.bank_names ?? []).join(', '))}">
       <p class="help" id="bank_names-help">ชื่อต้นตามที่ขึ้นบนสลิป ไม่ต้องมีนาย/นามสกุล คั่นหลายชื่อด้วย ,</p>
       <label for="account_suffixes">เลขท้ายบัญชี 4 ตัว</label><input id="account_suffixes" inputmode="numeric" placeholder="เช่น 1234" aria-describedby="account_suffixes-help" value="${esc((mine.account_suffixes ?? []).join(', '))}">
@@ -338,6 +342,8 @@ async function viewSettings() {
       <label for="stale_slip_hours">สลิปเก่ากว่ากี่ชั่วโมงให้ถามก่อนนับ</label><input id="stale_slip_hours" inputmode="numeric" aria-describedby="stale_slip_hours-help" value="${s.stale_slip_hours ?? 24}">
       <p class="help" id="stale_slip_hours-help">0 = ไม่ถาม บันทึกทุกสลิปทันที</p>
       <label for="pending_answer_hours">ถ้าไม่ตอบภายในกี่ชั่วโมง ถือว่าไม่นับ</label><input id="pending_answer_hours" inputmode="numeric" value="${s.pending_answer_hours ?? 24}">
+      <label for="dup_window_minutes">เตือนรายการที่อาจซ้ำ ถ้ายอดเท่ากันภายในกี่นาที</label><input id="dup_window_minutes" inputmode="numeric" aria-describedby="dup_window_minutes-help" value="${s.dup_window_minutes ?? 10}">
+      <p class="help" id="dup_window_minutes-help">0 = ไม่เตือน · บันทึกตามปกติ แค่ต่อท้ายการ์ดให้รู้</p>
       <div class="actions"><button type="submit">บันทึกการตั้งค่า</button></div>
     </form>
     <section class="danger-zone" aria-labelledby="danger-h">
@@ -367,7 +373,8 @@ async function viewSettings() {
       // ส่งชื่อเฉพาะเมื่อเปลี่ยน — ชื่อจากโปรไฟล์ LINE เดิมอาจไม่ผ่านกฎใหม่ แต่ต้องยังบันทึกค่าอื่นได้
       ...(v('display_name') !== mine.display_name ? { display_name: v('display_name') } : {}), settle_time: v('settle_time'), default_split: v('default_split'),
       min_transfer: parseAmount(v('min_transfer') || '0') ?? -1, ai_daily_cap: Number(v('ai_daily_cap')), slip_retention_days: Number(v('slip_retention_days')),
-      stale_slip_hours: Number(v('stale_slip_hours')), pending_answer_hours: Number(v('pending_answer_hours')),
+      stale_slip_hours: Number(v('stale_slip_hours')), pending_answer_hours: Number(v('pending_answer_hours')), dup_window_minutes: Number(v('dup_window_minutes')),
+      bank_name: v('bank_name') || null, bank_account: v('bank_account') || null,
       promptpay_id: v('promptpay_id') || null, bank_names: list('bank_names'), account_suffixes: list('account_suffixes'),
     }
     const nameInput = /** @type {HTMLInputElement} */ ($app().querySelector('#display_name'))

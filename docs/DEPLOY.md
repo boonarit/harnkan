@@ -59,14 +59,14 @@ npm run -s migrate
 
 ## 3. launchd (bot + งานตามเวลา)
 
-แทน `__HOME__` และ `__NODE__` แล้วติดตั้ง:
+แทน `__HOME__` และ `__NODE__` แล้วติดตั้ง 4 งานของ node (tunnel ติดตั้งแยกในข้อ 4):
 
 ```sh
 cd ~/services/harnkan
 NODE_BIN=$(command -v node)
-for f in deploy/com.harnkan.*.plist; do sed -e "s#__HOME__#$HOME#g" -e "s#__NODE__#$NODE_BIN#g" "$f" > ~/Library/LaunchAgents/$(basename "$f"); done
-for f in ~/Library/LaunchAgents/com.harnkan.*.plist; do plutil -lint "$f"; done
-for f in ~/Library/LaunchAgents/com.harnkan.*.plist; do launchctl bootstrap "gui/$(id -u)" "$f"; done
+for j in bot summary backup retention; do sed -e "s#__HOME__#$HOME#g" -e "s#__NODE__#$NODE_BIN#g" "deploy/com.harnkan.$j.plist" > ~/Library/LaunchAgents/com.harnkan.$j.plist; done
+for j in bot summary backup retention; do plutil -lint ~/Library/LaunchAgents/com.harnkan.$j.plist; done
+for j in bot summary backup retention; do launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.harnkan.$j.plist; done
 launchctl list | grep harnkan
 curl -fsS http://127.0.0.1:8787/healthz
 ```
@@ -89,17 +89,50 @@ tail -n 5 ~/data/harnkan/logs/harnkan.log
 
 ## 4. cloudflared tunnel
 
+> **บน M4 มี `~/.cloudflared/config.yml` ของบริการอื่นอยู่แล้ว** → ทุกคำสั่ง `cloudflared` ของ harnkan ต้องมี `--config ~/.cloudflared/harnkan-config.yml` และอ้าง tunnel ด้วย **UUID** ไม่ใช่ชื่อ
+> ไม่งั้น `route dns` ไปผูก DNS กับ tunnel ของบริการอื่น (เกิดจริงตอน deploy B17 · แก้ด้วย `route dns --overwrite-dns <UUID> …`)
+> **ห้าม** `cloudflared service install` (ทับ service ของบริการอื่น) · ใช้ launchd `com.harnkan.tunnel` แทน
+
+ตั้งชื่อโดเมนไว้ในตัวแปร (zsh มี `HOST` เป็นตัวแปรพิเศษอยู่แล้ว จึงใช้ `HK_HOST`):
+
 ```sh
-cloudflared tunnel login
-cloudflared tunnel create harnkan
-cp ~/services/harnkan/deploy/cloudflared-harnkan.example.yml ~/.cloudflared/harnkan.yml
-open -e ~/.cloudflared/harnkan.yml
-cloudflared tunnel route dns harnkan harnkan.example.com
-cloudflared tunnel --config ~/.cloudflared/harnkan.yml run harnkan
+HK_HOST=harnkan.example.com
+cloudflared tunnel --config ~/.cloudflared/harnkan-config.yml login
+cloudflared tunnel --config ~/.cloudflared/harnkan-config.yml create harnkan
+cloudflared tunnel --config ~/.cloudflared/harnkan-config.yml list
 ```
 
-แก้ `<TUNNEL_ID>`, `__HOME__` และ hostname ใน `harnkan.yml` ให้ตรง · เปิดเฉพาะ `/webhook /healthz /qr/ /app/ /api/ /domain/` ที่เหลือ 404
-ให้ tunnel รันตลอดด้วย `sudo cloudflared service install` หรือ launchd ตามที่ใช้กับบริการอื่นบน M4
+จด UUID ของ tunnel ชื่อ `harnkan` จากคำสั่ง list แล้ว:
+
+```sh
+HK_UUID=00000000-0000-0000-0000-000000000000
+sed -e "s#<TUNNEL_UUID>#$HK_UUID#g" -e "s#__HOME__#$HOME#g" -e "s#harnkan.example.com#$HK_HOST#g" ~/services/harnkan/deploy/cloudflared-harnkan.example.yml > ~/.cloudflared/harnkan-config.yml
+cloudflared tunnel --config ~/.cloudflared/harnkan-config.yml ingress validate
+cloudflared tunnel --config ~/.cloudflared/harnkan-config.yml route dns --overwrite-dns "$HK_UUID" "$HK_HOST"
+```
+
+ingress ใช้ `http://127.0.0.1:8787` (ไม่ใช่ `localhost`) · เปิดเฉพาะ `/webhook /healthz /qr/ /app/ /api/ /domain/` ที่เหลือ 404
+
+ติดตั้ง launchd ให้ tunnel รันตลอด:
+
+```sh
+CF_BIN=$(command -v cloudflared)
+sed -e "s#__HOME__#$HOME#g" -e "s#__CLOUDFLARED__#$CF_BIN#g" -e "s#__TUNNEL_UUID__#$HK_UUID#g" ~/services/harnkan/deploy/com.harnkan.tunnel.plist > ~/Library/LaunchAgents/com.harnkan.tunnel.plist
+plutil -lint ~/Library/LaunchAgents/com.harnkan.tunnel.plist
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.harnkan.tunnel.plist
+tail -n 20 ~/data/harnkan/logs/tunnel.log
+```
+
+ตรวจจากภายนอก (ผลที่ถูก: healthz = JSON · `/` = 404 · GET `/webhook` = 404 · POST `/webhook` ไม่มีลายเซ็น = 401):
+
+```sh
+curl -sS "https://$HK_HOST/healthz"
+curl -sS -o /dev/null -w "%{http_code}\n" "https://$HK_HOST/"
+curl -sS -o /dev/null -w "%{http_code}\n" "https://$HK_HOST/webhook"
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST -d "{}" "https://$HK_HOST/webhook"
+```
+
+ถ้า healthz ไม่ใช่ JSON ของ harnkan (เช่นได้หน้าของบริการอื่น) = DNS ผูกผิด tunnel → รัน `route dns --overwrite-dns` ด้านบนอีกครั้ง
 
 ## 5. อัปเดตเวอร์ชัน
 
@@ -107,7 +140,9 @@ cloudflared tunnel --config ~/.cloudflared/harnkan.yml run harnkan
 bash ~/services/harnkan/deploy/update.sh
 ```
 
-สคริปต์จด commit ก่อนอัปเดตไว้ที่ `~/data/harnkan/last-good-commit` → git pull → npm ci → **สำรอง DB** (`npm run job:backup` ไม่ migrate · สำรองล้ม = สคริปต์หยุด ยังไม่แตะ schema) → migrate → restart bot → เช็ค healthz
+สคริปต์จด commit ก่อนอัปเดตไว้ที่ `~/data/harnkan/last-good-commit` → **สำรอง DB ก่อน git pull** (`npm run job:backup` ไม่ migrate · สำรองล้ม = หยุด ยังไม่แตะโค้ดและ schema) → git pull → **exec update.sh รุ่นที่เพิ่ง pull** (ขั้นที่เพิ่มในรุ่นใหม่จึงทำงานตั้งแต่รอบนี้) → npm ci → migrate → restart bot → เช็ค healthz
+
+ไฟล์สำรองตั้งชื่อเป็นเวลาไทย เช่น `harnkan-20260930-015035+07.db.gz` (ไฟล์ก่อน B18 ไม่มี `+07` และเป็นเวลา UTC) · เรียงหาล่าสุดด้วย `ls -1t` (ตามเวลาไฟล์) ได้ทั้งสองแบบ
 
 migration ทุกตัวเป็นแบบเพิ่มอย่างเดียว (ADD COLUMN) · ถ้า migrate แล้วมีปัญหา กู้ DB จากไฟล์สำรองล่าสุดตามข้อ 8
 
@@ -124,11 +159,11 @@ curl -fsS http://127.0.0.1:8787/healthz
 ## 7. ปิดระบบชั่วคราว (ไม่ลบโค้ด ไม่ลบข้อมูล)
 
 ```sh
-for l in bot summary backup retention; do launchctl bootout "gui/$(id -u)/com.harnkan.$l"; done
+for l in bot summary backup retention tunnel; do launchctl bootout "gui/$(id -u)/com.harnkan.$l"; done
 launchctl list | grep harnkan
 ```
 
-ถ้าเจอ error ว่าไม่พบ service แปลว่าปิดอยู่แล้ว · หยุด tunnel ด้วย `Ctrl+C` หรือ `sudo launchctl bootout system/com.cloudflare.cloudflared` ถ้าติดตั้งเป็น service
+ถ้าเจอ error ว่าไม่พบ service แปลว่าปิดอยู่แล้ว · ปิดแค่ harnkan ไม่แตะ tunnel/cloudflared ของบริการอื่น
 
 เปิดกลับ:
 
@@ -162,7 +197,7 @@ ls -1t ~/backups/harnkan | head -3
 mv ~/data/harnkan/harnkan.db ~/data/harnkan/harnkan.db.broken-$(date +%Y%m%d%H%M)
 rm -f ~/data/harnkan/harnkan.db-wal ~/data/harnkan/harnkan.db-shm
 gunzip -c ~/backups/harnkan/<ไฟล์ล่าสุด>.db.gz > ~/data/harnkan/harnkan.db
-for f in ~/Library/LaunchAgents/com.harnkan.*.plist; do launchctl bootstrap "gui/$(id -u)" "$f"; done
+for j in bot summary backup retention; do launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.harnkan.$j.plist; done
 curl -fsS http://127.0.0.1:8787/healthz
 ```
 
@@ -183,3 +218,27 @@ rm ~/Library/LaunchAgents/com.harnkan.*.plist
 - Build command: ว่าง · Output directory: `/` (รากรีโป)
 - เปิด `https://<project>.pages.dev/demo/`
 - เดโมใช้ `demo/` `public/app/` `src/domain/` `test/fixtures/synthetic/` แบบ static ล้วน ไม่มี server ไม่เก็บข้อมูลนอกเบราว์เซอร์
+
+## แก้ปัญหาที่เจอบ่อย
+
+### หลัง deploy mini app ในมือถือยังเป็นหน้าเก่า
+
+ตั้งแต่ B18 server ใส่ `?v=<เวอร์ชัน>` ให้ไฟล์ JS/CSS ทุกตัว และแอปเทียบเวอร์ชันกับ `/app/config.json` แล้ว reload เอง 1 ครั้ง · ถ้ายังเก่า:
+
+```sh
+curl -sS "https://$HK_HOST/app/config.json"
+curl -sS "https://$HK_HOST/app/" | grep -o 'harnkan-version" content="[0-9a-f]*'
+```
+
+สองค่าต้องตรงกัน · ถ้าไม่ตรง = Cloudflare แคช index ไว้ → Cloudflare dashboard → Caching → Purge `/app/*` · ในมือถือ ปิดหน้าแอปแล้วเปิดจาก LINE ใหม่
+
+### LINE บน Mac เปิดแอปใน Chrome แล้วขึ้น "เข้าสู่ระบบไม่สำเร็จ"
+
+LINE desktop เปิดลิงก์ LIFF ในเบราว์เซอร์ข้างนอก · ID token ของ LIFF หมดอายุราว 1 ชม. แต่สถานะล็อกอินอยู่ได้นาน · ตั้งแต่ B18 แอปตรวจอายุ token เองแล้ว logout + login ใหม่ 1 ครั้ง ("เซสชันหมดอายุ กำลังเข้าสู่ระบบใหม่…") · ถ้ายังไม่ได้ดู log:
+
+```sh
+grep auth_fail ~/data/harnkan/logs/harnkan.log | tail -n 5
+```
+
+`reason` บอกสาเหตุ (ไม่มี token ใน log): `expired` = token หมดอายุ (ปิดแท็บแล้วเปิดใหม่จาก LINE) · `bad_aud` = LIFF อยู่คนละ channel กับ `LIFF_CHANNEL_ID` ใน .env · `invalid` = token เสีย · `unreachable` = ต่อ LINE ไม่ได้ · `missing` = ไม่ได้ส่ง token
+

@@ -5,7 +5,7 @@ import { handleEvent, type Handlers, type LineEvent } from './line/router.ts'
 import { verifySignature } from './line/signature.ts'
 import { readQrPng } from './promptpay/qr.ts'
 import { handleApi } from './api/routes.ts'
-import { serveStatic } from './static.ts'
+import { assetVersion, serveStatic } from './static.ts'
 import { log } from './log.ts'
 import { health } from './health.ts'
 import { clientIp, LIMITS, RateLimiter } from './security.ts'
@@ -65,14 +65,14 @@ export function makeServer(ctx: Ctx, handlers: Handlers = {}, limits = LIMITS): 
         return send(res, 200, { ok: true })
       }
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/app')) return send(res, 302, { to: '/app/' }, { location: '/app/' })
-      if (req.method === 'GET' && url.pathname === '/app/config.json') return send(res, 200, { liffId: ctx.cfg.liffId, fake: ctx.cfg.fakeLine })
-      if (req.method === 'GET' && serveStatic(res, url.pathname)) return
+      if (req.method === 'GET' && url.pathname === '/app/config.json') return send(res, 200, { liffId: ctx.cfg.liffId, fake: ctx.cfg.fakeLine, version: assetVersion() }, { 'cache-control': 'no-cache' })
+      if (req.method === 'GET' && serveStatic(res, url.pathname, url.searchParams.get('v'))) return
       if (await handleApi(ctx, req, res, url)) return
       send(res, 404, { error: 'not found' })
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500
       if (status === 500) log.error('http_error', { path: req.url?.split('?')[0], message: (e as Error).message })
-      else if (status === 401) log.warn('auth_fail', { path: req.url?.split('?')[0] })
+      else if (status === 401) log.warn('auth_fail', { path: req.url?.split('?')[0], reason: (e as { reason?: string }).reason ?? 'missing' })
       const field = e instanceof HttpError && e.field ? { field: e.field } : {}
       if (!res.headersSent) send(res, status, { error: status === 500 ? 'internal error' : (e as Error).message, ...field })
     }

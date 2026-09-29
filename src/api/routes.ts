@@ -14,6 +14,7 @@ import { HttpError, readBody, send } from '../http.ts'
 import { closeBalance } from '../settle.ts'
 import { classify, PENDING_ANSWER_HOURS, SELF_MERCHANT, STALE_SLIP_HOURS } from '../slip/classify.ts'
 import { fixSlip } from '../slip/flow.ts'
+import { DUP_WINDOW_MINUTES } from '../dup.ts'
 import { wipedMessages, wipeWithBackup } from '../wipe.ts'
 
 export const API_MAX_BYTES = 16 * 1024
@@ -23,9 +24,9 @@ type Auth = { couple: Couple; member: Member; members: Member[] }
 async function authenticate(ctx: Ctx, req: IncomingMessage, url: URL): Promise<Auth> {
   const m = (req.headers.authorization ?? '').match(/^Bearer (\S{1,4096})$/)
   if (!m) throw new HttpError(401, 'ต้องเข้าสู่ระบบ')
-  const sub = await ctx.verifier.verify(m[1]).catch(() => null)
-  if (!sub) throw new HttpError(401, 'token ไม่ถูกต้อง')
-  const mine = ctx.repo.membersByLineUser(sub)
+  const r = await ctx.verifier.verify(m[1]).catch(() => ({ reason: 'invalid' as const }))
+  if (!('sub' in r)) throw Object.assign(new HttpError(401, 'token ไม่ถูกต้อง'), { reason: r.reason })
+  const mine = ctx.repo.membersByLineUser(r.sub)
   const wanted = url.searchParams.get('couple')
   const member = wanted ? mine.find((x) => String(x.couple_id) === wanted) : mine[0]
   if (!member) throw new HttpError(403, 'ยังไม่ได้อยู่ในกลุ่มหารกัน')
@@ -78,12 +79,13 @@ export function expenseJson(e: Expense) {
 }
 const memberJson = (m: Member) => ({
   id: m.id, display_name: m.display_name, promptpay_id: m.promptpay_id, bank_names: JSON.parse(m.bank_names) as string[],
-  account_suffixes: JSON.parse(m.account_suffixes || '[]') as string[],
+  account_suffixes: JSON.parse(m.account_suffixes || '[]') as string[], bank_name: m.bank_name ?? null, bank_account: m.bank_account ?? null,
 })
 const settingsJson = (c: Couple, cfg: Ctx['cfg']) => ({
   settle_time: c.settle_time, min_transfer: c.min_transfer, default_split: c.default_split,
   ai_daily_cap: c.ai_daily_cap ?? cfg.aiDailyCap, slip_retention_days: c.slip_retention_days ?? cfg.slipRetentionDays,
   stale_slip_hours: c.stale_slip_hours ?? STALE_SLIP_HOURS, pending_answer_hours: c.pending_answer_hours ?? PENDING_ANSWER_HOURS,
+  dup_window_minutes: c.dup_window_minutes ?? DUP_WINDOW_MINUTES,
 })
 const settlementJson = (s: Settlement) => ({ id: s.id, from: s.from_member, to: s.to_member, amount: s.amount_satang, kind: s.kind, day: s.day, summary_id: s.summary_id, slip_id: s.slip_id })
 
@@ -108,7 +110,7 @@ function pending(ctx: Ctx, a: Auth, day: string) {
   const d = decide(net, 0)
   if (d.action === 'zero') return null
   const to = a.members[d.to]
-  return { amount: d.amount, from: a.members[d.from].id, to: to.id, promptpay_id: to.promptpay_id, summary_date: open && !open.settled ? open.date : null }
+  return { amount: d.amount, from: a.members[d.from].id, to: to.id, promptpay_id: to.promptpay_id, bank_name: to.bank_name ?? null, bank_account: to.bank_account ?? null, summary_date: open && !open.settled ? open.date : null }
 }
 
 function ownExpense(ctx: Ctx, a: Auth, id: string) {
@@ -274,6 +276,16 @@ export async function handleApi(ctx: Ctx, req: IncomingMessage, res: ServerRespo
       } else if (k === 'pending_answer_hours') {
         if (v !== null && !isInt(v, 1, 168)) throw bad('pending_answer_hours ต้องเป็น 1–168')
         c.pending_answer_hours = v as number | null
+      } else if (k === 'dup_window_minutes') {
+        if (v !== null && !isInt(v, 0, 1440)) throw bad('dup_window_minutes ต้องเป็น 0–1440 (0 = ไม่เตือน)')
+        c.dup_window_minutes = v as number | null
+      } else if (k === 'bank_name') {
+        if (v !== null && (typeof v !== 'string' || !v.trim() || v.length > 30)) throw bad('bank_name ต้องเป็นข้อความ 1–30 ตัว')
+        me.bank_name = v === null ? null : (v as string).trim()
+      } else if (k === 'bank_account') {
+        const d = typeof v === 'string' ? v.replace(/[\s-]/g, '') : v
+        if (d !== null && (typeof d !== 'string' || !/^\d{10,15}$/.test(d))) throw bad('bank_account ต้องเป็นเลข 10–15 หลัก')
+        me.bank_account = d as string | null
       } else if (k === 'account_suffixes') {
         if (!Array.isArray(v) || v.length > 5 || !v.every((x) => typeof x === 'string' && /^\d{4}$/.test(x))) throw bad('เลขท้ายบัญชีต้องเป็นเลข 4 หลัก ไม่เกิน 5 บัญชี')
         me.account_suffixes = v as string[]

@@ -68,7 +68,7 @@ test('แชท "ตั้งชื่อ แตงโม" → ยืนยั�
   line.take()
 
   await send(ev.text(A_ID, 'ครีมกันแดดของแตงโม 359'))
-  const card = JSON.stringify(line.take()[0].messages)
+  const card = JSON.stringify(line.take()[0].messages[0]) // [1] = การ์ดเตือนตั้งค่า (B18: ยังไม่ใส่ชื่อบัญชี) ซึ่งมีคำว่า "ลงทะเบียน"
   const [e] = repo.expensesByDay(couple.id, DAY)
   assert.deepEqual([e.split_mode, e.merchant], ['theirs', 'ครีมกันแดด'])
   assert.match(card, /ของแตงโม/)

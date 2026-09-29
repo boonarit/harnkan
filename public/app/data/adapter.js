@@ -22,10 +22,14 @@ export class ApiError extends Error {
 
 export class ApiAdapter {
   /**
-   * @param {{ getToken: () => Promise<string>, fetch?: typeof fetch, base?: string, couple?: number | null }} opts
+   * @param {{ getToken: () => Promise<string>, fetch?: typeof fetch, base?: string, couple?: number | null,
+   *   onUnauthorized?: () => Promise<unknown>, onOk?: () => void }} opts
+   *   onUnauthorized: 401 → เข้าสู่ระบบใหม่ (ไม่ resolve = กำลัง redirect · throw = ยอมแพ้พร้อมข้อความ)
    */
   constructor(opts) {
     this.getToken = opts.getToken
+    this.onUnauthorized = opts.onUnauthorized
+    this.onOk = opts.onOk
     this.fetch = opts.fetch ?? globalThis.fetch.bind(globalThis)
     this.base = opts.base ?? ''
     this.couple = opts.couple ?? null
@@ -38,6 +42,8 @@ export class ApiAdapter {
       headers: { authorization: `Bearer ${await this.getToken()}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
+    if (res.status === 401 && this.onUnauthorized) await this.onUnauthorized()
+    if (res.ok) this.onOk?.()
     if (!res.ok) {
       let msg = `HTTP ${res.status}`
       /** @type {string | undefined} */

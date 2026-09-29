@@ -35,8 +35,17 @@ export async function resolveSender(ctx: Ctx, ev: LineEvent): Promise<{ couple: 
       }
       return null
     }
-    const profile = await ctx.line.getGroupMemberProfile(groupId, userId).catch(() => ({ displayName: 'ไม่ทราบชื่อ' }))
-    member = ctx.repo.addMember(couple.id, userId, profile.displayName.slice(0, 40))
+    let source = 'profile'
+    const profile = await ctx.line.getGroupMemberProfile(groupId, userId).catch((e) => {
+      log.warn('profile_fetch_failed', { couple: couple.id, message: (e as Error).message })
+      source = 'fallback'
+      return { displayName: 'ไม่ทราบชื่อ' }
+    })
+    // ตัดตาม code point (slice ของ string ผ่ากลางอีโมจิได้) · B18 สืบชื่อ "T": log แค่ความยาว ห้าม log ตัวชื่อ
+    const raw = String(profile.displayName ?? '')
+    const name = [...raw].slice(0, 40).join('') || 'ไม่ทราบชื่อ'
+    member = ctx.repo.addMember(couple.id, userId, name)
+    log.info('member_registered', { couple: couple.id, member: member.id, name_len: [...raw].length, source })
     return { couple, member, members: ctx.repo.members(couple.id), isNew: true }
   }
   return { couple, member, members: ctx.repo.members(couple.id) }
@@ -78,7 +87,7 @@ export async function handleEvent(ctx: Ctx, ev: LineEvent, h: Handlers = {}) {
   if (ev.type !== 'message' && ev.type !== 'postback') return
   const who = await resolveSender(ctx, ev)
   if (!who) return
-  const p = prefixReplies(ctx, who.isNew ? [{ type: 'text', text: registeredText(who.member, who.members) }] : [])
+  const p = prefixReplies(ctx, who.isNew ? [{ type: 'text', text: registeredText(ctx.repo, who.member, who.members) }] : [])
   if (ev.type === 'postback') await h.postback?.(p.ctx, ev, who)
   else if (ev.message?.type === 'text') await h.text?.(p.ctx, ev, who)
   else if (ev.message?.type === 'image') await h.image?.(p.ctx, ev, who)

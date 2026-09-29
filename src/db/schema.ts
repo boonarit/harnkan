@@ -128,6 +128,12 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE couples ADD COLUMN pending_answer_hours INTEGER CHECK (pending_answer_hours >= 1);
   ALTER TABLE couples ADD COLUMN onboard_nudged_on TEXT;
   `,
+  // 4 (B18): เพิ่มอย่างเดียว — หน้าต่างเตือนรายการซ้ำ (null = ค่าเริ่ม 10 นาที · 0 = ปิด) · บัญชีรับเงินสำหรับคนที่ไม่ผูกพร้อมเพย์
+  `
+  ALTER TABLE couples ADD COLUMN dup_window_minutes INTEGER CHECK (dup_window_minutes >= 0);
+  ALTER TABLE members ADD COLUMN bank_name TEXT;
+  ALTER TABLE members ADD COLUMN bank_account TEXT;
+  `,
 ]
 
 export function openDb(path: string): DatabaseSync {

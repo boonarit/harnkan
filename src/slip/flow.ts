@@ -6,9 +6,10 @@ import { formatBaht } from '../domain/money.js'
 import type { SplitMode } from '../domain/split.js'
 import { bangkokDate, bangkokTime, businessDay } from '../domain/time.js'
 import type { Message } from '../line/client.ts'
-import { expenseCard, netText } from '../line/flex.ts'
+import { appUrl, expenseCard, netText } from '../line/flex.ts'
 import type { LineEvent } from '../line/router.ts'
 import { nudge } from '../onboard.ts'
+import { dupNote } from '../dup.ts'
 import { recordSettlement } from '../settle.ts'
 import { classify, PENDING_ANSWER_HOURS, PERSON_MERCHANT, SELF_MERCHANT, STALE_SLIP_HOURS } from './classify.ts'
 import type { Classified } from './classify.ts'
@@ -131,7 +132,7 @@ const aiOf = (slip: Slip): SlipAi | null => (slip.ai_json ? JSON.parse(slip.ai_j
 /** การ์ดรายการจากสลิป + ปุ่มแก้แตะเดียว (เปลี่ยนการหาร · ไม่นับ · เป็นเคลียร์ยอด) + เตือนตั้งค่าวันละครั้ง */
 function slipExpenseReply(ctx: Ctx, who: Who, e: Expense, rule: string | null, title?: string): Message[] {
   const members = ctx.repo.members(who.couple.id)
-  const card = expenseCard(e, members, ctx.repo.ledger(who.couple.id, e.day).net, title)
+  const card = expenseCard(e, members, ctx.repo.ledger(who.couple.id, e.day).net, title, appUrl(ctx.cfg.liffId, `/e/${e.id}`))
   const qr = card.quickReply as { items: unknown[] }
   qr.items.push(btn('ไม่นับ', `fix:${e.slip_id}:ignore`))
   if (rule === 'person') qr.items.push(btn('เป็นเคลียร์ยอด', `fix:${e.slip_id}:settle`))
@@ -171,7 +172,8 @@ export function finalizeSlip(ctx: Ctx, who: Who, slip: Slip, amount: number): Me
   }
   const x = c?.kind === 'expense' ? c : { merchant: ai?.merchant || 'สลิป', category: ai?.category ?? null, rule: 'shop' }
   const e = createSlipExpense(ctx, who, slip, poster.id, amount, x.merchant, x.category, who.couple.default_split, poster.id)
-  return slipExpenseReply(ctx, who, e, x.rule)
+  const [card, ...rest] = slipExpenseReply(ctx, who, e, x.rule)
+  return [card, ...dupNote(ctx, who.couple, e), ...rest]
 }
 
 export type FixOp = 'today' | 'ignore' | 'count' | 'notsettle' | 'settle' | 'half' | 'mine' | 'theirs'

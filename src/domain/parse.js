@@ -3,12 +3,12 @@ import { parseAmount } from './money.js'
 
 /**
  * @typedef {{ kind: 'expense', merchant: string, amount: number, mode: 'treat' | 'half' | null, forName: string | null }} ExpenseIntent
- * @typedef {{ kind: 'command', command: 'summary' | 'undo' | 'help' | 'deleteAll' | 'setup' }} CommandIntent
+ * @typedef {{ kind: 'command', command: 'summary' | 'undo' | 'help' | 'deleteAll' | 'setup' | 'app' }} CommandIntent
  * @typedef {{ kind: 'command', command: 'rename', name: string }} RenameIntent
  */
 
 // ---- คำที่ parser ใช้ (แหล่งเดียว: ตัวตรวจชื่อ domain/name.js ดึงจาก PARSER_WORDS) ----
-const COMMANDS = /** @type {const} */ ({ สรุป: 'summary', ยกเลิก: 'undo', ช่วยด้วย: 'help', ลบข้อมูลทั้งหมด: 'deleteAll', ตั้งค่า: 'setup' })
+const COMMANDS = /** @type {const} */ ({ สรุป: 'summary', ยกเลิก: 'undo', ช่วยด้วย: 'help', ลบข้อมูลทั้งหมด: 'deleteAll', ตั้งค่า: 'setup', แอป: 'app' })
 const RENAME = 'ตั้งชื่อ'
 const OWNER = 'ของ'
 /** คำหน้า/ท้ายรายการที่กำหนดโหมดหาร */

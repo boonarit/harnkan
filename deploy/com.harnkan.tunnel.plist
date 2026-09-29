@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- template: แทน __HOME__ __CLOUDFLARED__ __TUNNEL_UUID__ ก่อนติดตั้ง (ดู docs/DEPLOY.md ข้อ 4) · ใช้ config แยกของ harnkan เสมอ ห้ามพึ่ง ~/.cloudflared/config.yml -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.harnkan.tunnel</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__CLOUDFLARED__</string>
+    <string>tunnel</string>
+    <string>--config</string>
+    <string>__HOME__/.cloudflared/harnkan-config.yml</string>
+    <string>run</string>
+    <string>__TUNNEL_UUID__</string>
+  </array>
+  <key>StandardOutPath</key><string>__HOME__/data/harnkan/logs/tunnel.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/data/harnkan/logs/tunnel.log</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+</dict>
+</plist>

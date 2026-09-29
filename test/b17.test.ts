@@ -17,7 +17,6 @@ import { runSummary } from '../src/jobs/summary.ts'
 import { makeServer } from '../src/server.ts'
 import { classify, isStale } from '../src/slip/classify.ts'
 import { normalize, type SlipAi } from '../src/slip/vision.ts'
-import { needsBankName } from '../src/onboard.ts'
 import { makeSlipPng } from './fixtures/make-slip.ts'
 import { A_ID, B_ID, ev, listen, makeCtx } from './helpers/app.ts'
 import { tmpDir } from './helpers/db.ts'
@@ -415,17 +414,18 @@ test('onboarding: เข้ากลุ่ม → การ์ด · คนท�
   out = await send(ev.text(A_ID, 'ชา 40'))
   assert.doesNotMatch(txt(out), /ยังตั้งค่าไม่ครบ/, 'วันเดียวกันไม่เตือนซ้ำ')
   out = await send(ev.text(A_ID, 'ตั้งค่า'))
-  assert.match(txt(out), /○ น้องบี 🐰: ชื่อบัญชีตามสลิป/)
-  assert.match(txt(out), /✓ ไม่จำเป็น · เอ: ชื่อบัญชีตามสลิป/)
+  // B18: ชื่อบัญชีว่าง = ⚠️ ทุกคน (เดิม B17 เดาจากตัวชื่อแล้วขึ้น ✓ ไม่จำเป็น)
+  assert.match(txt(out), /⚠️ น้องบี 🐰: ใส่ชื่อต้นตามสลิป/)
+  assert.match(txt(out), /⚠️ เอ: ใส่ชื่อต้นตามสลิป/)
   t.clock.t = at('09:00', '2026-09-30')
   out = await send(ev.text(A_ID, 'ชา 40'))
   assert.match(txt(out), /ยังตั้งค่าไม่ครบ/, 'วันใหม่เตือนได้อีกครั้ง')
-  const [, b] = t.repo.members(t.repo.allCouples()[0].id)
+  const [a, b] = t.repo.members(t.repo.allCouples()[0].id)
+  t.repo.updateMember(a.id, { bank_names: ['เอ'] })
   t.repo.updateMember(b.id, { bank_names: ['บี'] })
   out = await send(ev.text(A_ID, 'ชา 40'))
   out = await send(ev.text(A_ID, 'ตั้งค่า'))
   assert.match(txt(out), /พร้อมใช้แล้ว/)
-  assert.deepEqual(['เอ', 'บี', 'พี่ส้ม', 'Mek', 'น้องแนน', 'ส้ม 🍊'].map(needsBankName), [false, false, true, true, true, true])
 })
 
 // ---------- log การทำงานปกติ ----------
@@ -485,7 +485,7 @@ test('migrate จาก user_version 2 ที่มีข้อมูลทุ�
   // ยอดก่อน migrate คำนวณด้วย SQL ตรง (repo ใหม่อ่านคอลัมน์ใหม่ไม่ได้บน v2) = ยกมา 5000 − ส่วนของเอในชา 5000 + เอโอนให้บี 1000 + ปรับ 200
   const expectedNet = (35000 - 30000) - 5000 + 1000 + 200
   assert.equal(migrate(db), MIGRATIONS.length)
-  assert.equal(db.prepare('PRAGMA user_version').get()!.user_version, 3)
+  assert.equal(db.prepare('PRAGMA user_version').get()!.user_version, MIGRATIONS.length)
   assert.deepEqual(snap(), before)
   assert.equal(repoBefore.ledger(1, '2026-09-29').net, expectedNet)
   const st = repoBefore.settlement(1)!
@@ -496,14 +496,6 @@ test('migrate จาก user_version 2 ที่มีข้อมูลทุ�
   assert.equal(repoBefore.couple(1)!.ai_daily_cap, 10)
   // migration ใหม่ต้องเพิ่มอย่างเดียว
   for (const sql of MIGRATIONS.slice(2)) assert.doesNotMatch(sql, /\b(DROP|RENAME|INSERT INTO|DELETE FROM|UPDATE)\b/i)
-})
-
-test('deploy/update.sh สำรอง DB ก่อน migrate (สำรองล้ม = set -e หยุด)', () => {
-  const u = readFileSync(join(import.meta.dirname, '../deploy/update.sh'), 'utf8')
-  const b = u.indexOf('npm run -s job:backup')
-  assert.ok(b > 0, 'ไม่มีขั้นสำรอง')
-  assert.ok(b < u.indexOf('npm run -s migrate'), 'ต้องสำรองก่อน migrate')
-  assert.ok(b > u.indexOf('npm ci'), 'สำรองหลัง npm ci (job ใช้ node_modules ของรุ่นใหม่)')
 })
 
 test('npm run job:backup ไม่ migrate: DB v2 → ไฟล์สำรองยังเป็น v2 และ DB เดิมยังเป็น v2', () => {

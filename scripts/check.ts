@@ -22,6 +22,17 @@ const rules: Rule[] = [
     allow: (m) => /^08000000\d\d$/.test(m.replace(/[- ]/g, '')),
   },
   { name: 'เลขบัญชีธนาคาร', re: /(?<![\w.])\d{3}-\d-\d{5}-\d(?![\w])/ },
+  // B18: บัญชีแบบ 3-3-4 และค่าที่ใส่ให้ bank_account ตรงๆ · ปล่อยเลขปลอมศูนย์ล้วน (0000000001) และเบอร์ปลอม
+  {
+    name: 'เลขบัญชีธนาคาร (3-3-4)',
+    re: /(?<![\w.-])\d{3}-\d{3}-\d{4}(?![\w-])/g,
+    allow: (m) => /^(0{9}\d|08000000\d\d)$/.test(m.replace(/-/g, '')),
+  },
+  {
+    name: 'เลขบัญชีใน bank_account',
+    re: /bank_account["']?\s*[:=]\s*["']?\d[\d -]{8,16}\d/g,
+    allow: (m) => /^0+\d{1,2}$/.test(m.replace(/^\D+/, '').replace(/[ -]/g, '')),
+  },
   { name: 'เลขบัตรประชาชน', re: /(?<![\w.])\d-\d{4}-\d{5}-\d{2}-\d(?![\w])/ },
   // Node 22 compat: API ที่มีเฉพาะ Node ≥23 (ตรวจเฉพาะโค้ด)
   { name: 'API นอก Node 22', re: /\b(sqlite\.backup|stripTypeScriptTypes|process\.features\.typescript|URLPattern|fs\.glob\b|getCallSites|registerHooks)\b/, only: /\.(ts|js|mjs)$/ },

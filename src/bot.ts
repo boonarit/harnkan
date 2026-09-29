@@ -6,10 +6,11 @@ import { parseMessage } from './domain/parse.js'
 import { MODES } from './domain/split.js'
 import type { SplitMode } from './domain/split.js'
 import { businessDay } from './domain/time.js'
-import { expenseCard, netText } from './line/flex.ts'
+import { appButton, appUrl, expenseCard, netText } from './line/flex.ts'
 import type { Handlers, LineEvent } from './line/router.ts'
 import { onAwaitingAmount, onImage, onSlipPostback } from './slip/flow.ts'
 import { nudge, onboardCard } from './onboard.ts'
+import { dupNote } from './dup.ts'
 import { carrySummary } from './settle.ts'
 import { onWipePostback, startWipe } from './wipe.ts'
 
@@ -22,7 +23,7 @@ export const HELP = [
   '• "ครีมกันแดดของบี 359" → ของอีกคนทั้งหมด',
   '• ส่งรูปสลิป/ใบเสร็จ → อ่านยอดให้',
   '• "สรุป" ดูยอดตอนนี้ · "ยกเลิก" ลบรายการล่าสุดของคุณ (รวมการโอน)',
-  '• "ตั้งค่า" ดูเช็กลิสต์ตั้งค่า',
+  '• "ตั้งค่า" ดูเช็กลิสต์ตั้งค่า · "แอป" เปิดแอป',
   '• "ตั้งชื่อ ส้ม" เปลี่ยนชื่อที่บอทใช้เรียกคุณ',
   '• 21:00 สรุปยอดโอนเดียว + QR พร้อมเพย์',
 ].join('\n')
@@ -62,6 +63,12 @@ async function onText(ctx: Ctx, ev: LineEvent, who: Who) {
 
   if (intent.kind === 'command') {
     if (intent.command === 'help') return replyText(ctx, ev, HELP)
+    if (intent.command === 'app') {
+      const url = appUrl(ctx.cfg.liffId, '/')
+      if (!url) return replyText(ctx, ev, 'แอปยังไม่พร้อมใช้ (ผู้ติดตั้งยังไม่ได้ตั้ง LIFF_ID)')
+      if (ev.replyToken) await ctx.line.reply(ev.replyToken, [{ type: 'flex', altText: 'เปิดแอปหารกัน', contents: { type: 'bubble', size: 'kilo', body: { type: 'box', layout: 'vertical', contents: [{ type: 'text', text: 'ดูรายการ ประวัติ เคลียร์ยอด และตั้งค่า', size: 'sm', wrap: true }, appButton(url, 'เปิดแอป')] } } }])
+      return
+    }
     if (intent.command === 'setup') return void (ev.replyToken && (await ctx.line.reply(ev.replyToken, [onboardCard(ctx, who.members)])))
     if (intent.command === 'rename') {
       const r = validateName(intent.name, who.members.filter((m) => m.id !== who.member.id).map((m) => m.display_name))
@@ -100,7 +107,7 @@ async function onText(ctx: Ctx, ev: LineEvent, who: Who) {
     coupleId: who.couple.id, paidBy: who.member.id, amount: intent.amount, merchant: intent.merchant.slice(0, 60),
     occurredAt: nowIso(ctx), day, mode, source: 'text', createdBy: who.member.id, createdAt: nowIso(ctx),
   })
-  if (ev.replyToken) await ctx.line.reply(ev.replyToken, [expenseCard(e, who.members, repo.ledger(who.couple.id, day).net), ...nudge(ctx, who.couple, who.members, day)])
+  if (ev.replyToken) await ctx.line.reply(ev.replyToken, [expenseCard(e, who.members, repo.ledger(who.couple.id, day).net, undefined, appUrl(ctx.cfg.liffId, `/e/${e.id}`)), ...dupNote(ctx, who.couple, e), ...nudge(ctx, who.couple, who.members, day)])
 }
 
 async function onPostback(ctx: Ctx, ev: LineEvent, who: Who) {
@@ -119,7 +126,7 @@ async function onPostback(ctx: Ctx, ev: LineEvent, who: Who) {
   if (!e || e.couple_id !== who.couple.id || e.status !== 'active') return replyText(ctx, ev, 'ไม่พบรายการนี้แล้ว')
   const day = today(ctx, who.couple)
   const updated = e.split_mode === m[2] ? e : ctx.repo.updateExpense(e.id, { mode: m[2] as SplitMode }, who.member.id, day)
-  if (ev.replyToken) await ctx.line.reply(ev.replyToken, [expenseCard(updated, who.members, ctx.repo.ledger(who.couple.id, day).net, '✓ เปลี่ยนการหารแล้ว')])
+  if (ev.replyToken) await ctx.line.reply(ev.replyToken, [expenseCard(updated, who.members, ctx.repo.ledger(who.couple.id, day).net, '✓ เปลี่ยนการหารแล้ว', appUrl(ctx.cfg.liffId, `/e/${updated.id}`))])
 }
 
 export const handlers: Handlers = {

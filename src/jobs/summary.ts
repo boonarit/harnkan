@@ -2,7 +2,7 @@ import type { Ctx } from '../app.ts'
 import type { Couple } from '../db/repo.ts'
 import { decide } from '../domain/balance.js'
 import { summaryDay } from '../domain/time.js'
-import { summaryCard } from '../line/flex.ts'
+import { appUrl, summaryCard } from '../line/flex.ts'
 import { makeQrPng } from '../promptpay/qr.ts'
 import { log } from '../log.ts'
 
@@ -43,7 +43,7 @@ export async function summarizeCouple(ctx: Ctx, couple: Couple): Promise<Summary
     if (!s.qr_token) repo.updateSummary(s.id, { qr_token: token })
     qrUrl = `${ctx.cfg.publicBaseUrl}/qr/${token}.png`
   }
-  const card = summaryCard({ summaryId: s.id, date, amount: d.amount, from, to, bills: ledger.expenses.length, carriedIn: s.carried_in, qrUrl })
+  const card = summaryCard({ summaryId: s.id, date, amount: d.amount, from, to, bills: ledger.expenses.length, carriedIn: s.carried_in, qrUrl, appLink: appUrl(ctx.cfg.liffId, '/settle') })
   const id = await ctx.line.push(couple.line_group_id, [card])
   repo.updateSummary(s.id, { sent_message_id: id ?? 'sent' })
   return { coupleId: couple.id, date, action: 'request', pushed: true }

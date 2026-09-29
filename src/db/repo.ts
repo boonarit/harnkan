@@ -8,12 +8,13 @@ export type Slot = 0 | 1
 export type Couple = {
   id: number; line_group_id: string; settle_time: string; min_transfer: number; default_split: SplitMode
   ai_daily_cap: number | null; slip_retention_days: number | null; stale_slip_hours: number | null; pending_answer_hours: number | null
-  onboard_nudged_on: string | null
+  onboard_nudged_on: string | null; dup_window_minutes: number | null
 }
-export type CoupleSettings = Partial<Pick<Couple, 'settle_time' | 'min_transfer' | 'default_split' | 'ai_daily_cap' | 'slip_retention_days' | 'stale_slip_hours' | 'pending_answer_hours'>>
+export type CoupleSettings = Partial<Pick<Couple, 'settle_time' | 'min_transfer' | 'default_split' | 'ai_daily_cap' | 'slip_retention_days' | 'stale_slip_hours' | 'pending_answer_hours' | 'dup_window_minutes'>>
 export type Member = {
   id: number; couple_id: number; line_user_id: string; display_name: string; promptpay_id: string | null; bank_names: string
   account_suffixes?: string // JSON array เลขท้ายบัญชี 4 หลัก (ไม่มี = ยังไม่ตั้ง)
+  bank_name?: string | null; bank_account?: string | null // บัญชีรับเงิน (แทน QR เมื่อไม่มีพร้อมเพย์) · อยู่ใน DB เท่านั้น
 }
 export type Expense = {
   id: number; couple_id: number; paid_by: number; amount_satang: number; merchant: string; category: string | null
@@ -104,6 +105,11 @@ export class Repo {
   markNudged(id: number, day: string) {
     return Number(this.db.prepare('UPDATE couples SET onboard_nudged_on = ? WHERE id = ? AND (onboard_nudged_on IS NULL OR onboard_nudged_on <> ?)').run(day, id, day).changes) > 0
   }
+  /** เคยมีสลิปโอนระหว่างคู่ที่จับชื่อคนนี้ได้ตรง (กฎ partner) → ชื่อบนสลิปใช้ได้แล้วแม้ไม่ได้ตั้ง bank_names */
+  partnerSlipMatched(memberId: number) {
+    return !!this.get(`SELECT 1 FROM settlements s JOIN slips p ON p.id = s.slip_id
+      WHERE s.status = 'active' AND p.rule = 'partner' AND (s.to_member = ? OR (s.from_member = ? AND s.created_by IS NOT ?)) LIMIT 1`, memberId, memberId, memberId)
+  }
   /** จำนวนสิ่งที่จะหายถ้าลบทั้งหมด (แสดงก่อนยืนยัน) */
   wipeCounts(id: number) {
     const n = (t: string) => this.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t} WHERE couple_id = ?`, id)!.n
@@ -130,12 +136,14 @@ export class Repo {
     const id = this.run('INSERT INTO members (couple_id, line_user_id, display_name) VALUES (?, ?, ?)', coupleId, lineUserId, displayName)
     return this.member(id)!
   }
-  updateMember(id: number, p: Partial<{ display_name: string; promptpay_id: string | null; bank_names: string[]; account_suffixes: string[] }>) {
+  updateMember(id: number, p: Partial<{ display_name: string; promptpay_id: string | null; bank_names: string[]; account_suffixes: string[]; bank_name: string | null; bank_account: string | null }>) {
     const m = this.member(id)!
+    const keep = <K extends keyof typeof p>(k: K, cur: unknown) => (p[k] !== undefined ? p[k] : cur) as SQLInputValue
     this.run(
-      'UPDATE members SET display_name = ?, promptpay_id = ?, bank_names = ?, account_suffixes = ? WHERE id = ?',
-      p.display_name ?? m.display_name, p.promptpay_id !== undefined ? p.promptpay_id : m.promptpay_id,
-      p.bank_names ? JSON.stringify(p.bank_names) : m.bank_names, p.account_suffixes ? JSON.stringify(p.account_suffixes) : m.account_suffixes ?? '[]', id,
+      'UPDATE members SET display_name = ?, promptpay_id = ?, bank_names = ?, account_suffixes = ?, bank_name = ?, bank_account = ? WHERE id = ?',
+      p.display_name ?? m.display_name, keep('promptpay_id', m.promptpay_id),
+      p.bank_names ? JSON.stringify(p.bank_names) : m.bank_names, p.account_suffixes ? JSON.stringify(p.account_suffixes) : m.account_suffixes ?? '[]',
+      keep('bank_name', m.bank_name ?? null), keep('bank_account', m.bank_account ?? null), id,
     )
     return this.member(id)!
   }
@@ -164,6 +172,11 @@ export class Repo {
   }
   expensesBetween(coupleId: number, from: string, to: string) {
     return this.all<Expense>("SELECT * FROM expenses WHERE couple_id = ? AND day BETWEEN ? AND ? AND status = 'active' ORDER BY day, occurred_at, id", coupleId, from, to).map((r) => this.hydrate(r)!)
+  }
+  /** รายการของคนจ่ายเดียวกัน ยอดเท่ากัน ที่สร้างตั้งแต่ sinceIso ถึงก่อนรายการ e (ใช้เตือนว่าอาจซ้ำ) */
+  similarBefore(e: Expense, sinceIso: string) {
+    return this.get<Expense>(`SELECT * FROM expenses WHERE couple_id = ? AND paid_by = ? AND amount_satang = ? AND status = 'active' AND id <> ?
+      AND created_at >= ? AND created_at <= ? ORDER BY created_at DESC, id DESC LIMIT 1`, e.couple_id, e.paid_by, e.amount_satang, e.id, sinceIso, e.created_at)
   }
   /** รายการล่าสุดที่คนนี้สร้างและยังไม่ถูกลบ (expense หรือ settlement) · ลำดับจาก audit_log */
   lastRecordBy(coupleId: number, memberId: number): { entity: 'expense'; row: Expense } | { entity: 'settlement'; row: Settlement } | undefined {
