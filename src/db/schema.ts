@@ -117,6 +117,17 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE couples ADD COLUMN ai_daily_cap INTEGER CHECK (ai_daily_cap >= 0);
   ALTER TABLE couples ADD COLUMN slip_retention_days INTEGER CHECK (slip_retention_days >= 1);
   `,
+  // 3 (B17): เพิ่มอย่างเดียว — ข้อมูลเดิมได้ค่าเริ่มต้น (settlement เดิม = active/transfer · สลิปเดิม = นับ)
+  `
+  ALTER TABLE members ADD COLUMN account_suffixes TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE settlements ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','deleted'));
+  ALTER TABLE settlements ADD COLUMN kind TEXT NOT NULL DEFAULT 'transfer' CHECK (kind IN ('transfer','manual_close'));
+  ALTER TABLE slips ADD COLUMN rule TEXT;
+  ALTER TABLE slips ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE couples ADD COLUMN stale_slip_hours INTEGER CHECK (stale_slip_hours >= 0);
+  ALTER TABLE couples ADD COLUMN pending_answer_hours INTEGER CHECK (pending_answer_hours >= 1);
+  ALTER TABLE couples ADD COLUMN onboard_nudged_on TEXT;
+  `,
 ]
 
 export function openDb(path: string): DatabaseSync {

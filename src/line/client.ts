@@ -52,6 +52,8 @@ export type OutboxItem = { kind: 'reply' | 'push'; to: string; messages: Message
 /** ไม่เรียก LINE จริง เก็บข้อความที่จะส่งไว้ใน outbox */
 export class FakeLineClient implements LineClient {
   outbox: OutboxItem[] = []
+  /** นับตลอดอายุ (take() ไม่ล้าง) — ใช้เทสต์ว่าการใช้งานปกติไม่เพิ่มจำนวน push */
+  sent = { reply: 0, push: 0 }
   profiles = new Map<string, string>([['U_fake_a', 'เอ'], ['U_fake_b', 'บี']])
   contents = new Map<string, Buffer>()
   fixtureDir: string
@@ -64,6 +66,7 @@ export class FakeLineClient implements LineClient {
   }
   private record(item: OutboxItem) {
     this.outbox.push(item)
+    this.sent[item.kind]++
     if (this.outboxFile) {
       mkdirSync(dirname(this.outboxFile), { recursive: true })
       appendFileSync(this.outboxFile, JSON.stringify({ at: new Date().toISOString(), ...item }) + '\n')

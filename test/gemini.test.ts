@@ -57,7 +57,7 @@ test('GeminiSlipReader: POST generateContent · key อยู่ใน header x-
   const decoded = await Jimp.read(Buffer.from(img.data, 'base64'))
   assert.ok(Math.max(decoded.width, decoded.height) <= 1568)
   // normalize ตัวเดียวกับ Claude: confidence ถูกหนีบ, items ผิดชนิด → []
-  assert.deepEqual(out, { ...RECEIPT, confidence: 1, items: [] })
+  assert.deepEqual(out, { ...RECEIPT, confidence: 1, items: [], sender_account: null, receiver_account: null, receiver_kind: null })
 })
 
 test('GeminiSlipReader: JSON เพี้ยน / ถูกบล็อก / 429 / 500 → throw (ข้อความไม่มี key)', async () => {

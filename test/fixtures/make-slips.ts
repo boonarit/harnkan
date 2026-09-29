@@ -35,7 +35,7 @@ export const SLIPS: Record<string, { title: string; lines: string[]; qr: { bank:
   'slip-blurry': {
     title: 'FAKE SHOP', lines: ['R E C E I P T', '?? 85.00 ??'],
     qr: null,
-    ai: { type: 'receipt', amount: 85, datetime: null, sender_name: null, receiver_name: null, merchant: 'ร้านน้ำ', items: [], category: 'อาหาร', confidence: 0.55 },
+    ai: { type: 'receipt', amount: 85, datetime: '2026-09-29T19:00:00+07:00', sender_name: null, receiver_name: null, merchant: 'ร้านน้ำ', items: [], category: 'อาหาร', confidence: 0.55 },
   },
 }
 

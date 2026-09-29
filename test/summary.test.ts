@@ -139,6 +139,7 @@ test('ยอด 0: มีรายการ → "วันนี้ไม่ม�
   const send = (e: any) => handleEvent(t.ctx, e, handlers)
   await send(ev.text(A_ID, 'หวัดดี'))
   await send(ev.text(B_ID, 'หวัดดี'))
+  t.line.take() // reply "ลงทะเบียนแล้ว" (B17)
   t.clock.t = at('21:00')
   await runSummary(t.ctx)
   assert.equal(t.line.outbox.length, 0)

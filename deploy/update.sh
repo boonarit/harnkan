@@ -1,5 +1,5 @@
 #!/bin/bash
-# อัปเดตบน M4: git pull → npm ci → migrate → restart bot → เช็ค healthz
+# อัปเดตบน M4: git pull → npm ci → สำรอง DB → migrate → restart bot → เช็ค healthz
 # ใช้: bash ~/services/harnkan/deploy/update.sh
 set -euo pipefail
 
@@ -12,6 +12,8 @@ echo "$PREV" > "$HOME/data/harnkan/last-good-commit"
 
 git pull --ff-only
 npm ci --omit=dev
+echo "สำรอง DB ก่อน migrate (ล้ม = หยุดทั้งสคริปต์ ยังไม่แตะ schema)"
+npm run -s job:backup
 npm run -s migrate
 
 launchctl kickstart -k "gui/$(id -u)/com.harnkan.bot"

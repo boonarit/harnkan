@@ -107,7 +107,9 @@ cloudflared tunnel --config ~/.cloudflared/harnkan.yml run harnkan
 bash ~/services/harnkan/deploy/update.sh
 ```
 
-สคริปต์จด commit ก่อนอัปเดตไว้ที่ `~/data/harnkan/last-good-commit` → git pull → npm ci → migrate → restart bot → เช็ค healthz
+สคริปต์จด commit ก่อนอัปเดตไว้ที่ `~/data/harnkan/last-good-commit` → git pull → npm ci → **สำรอง DB** (`npm run job:backup` ไม่ migrate · สำรองล้ม = สคริปต์หยุด ยังไม่แตะ schema) → migrate → restart bot → เช็ค healthz
+
+migration ทุกตัวเป็นแบบเพิ่มอย่างเดียว (ADD COLUMN) · ถ้า migrate แล้วมีปัญหา กู้ DB จากไฟล์สำรองล่าสุดตามข้อ 8
 
 ## 6. ตรวจว่าระบบยังมีชีวิต
 

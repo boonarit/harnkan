@@ -3,7 +3,10 @@ import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Ctx } from './app.ts'
 import type { Couple } from './db/repo.ts'
+import { runBackup } from './jobs/backup.ts'
+import type { Message } from './line/client.ts'
 import { log } from './log.ts'
+import { onboardCard } from './onboard.ts'
 
 const TTL = 5 * 60_000
 /** couple id → nonce + ขั้นที่ยืนยันแล้ว · ponytail: อยู่ในหน่วยความจำ รีสตาร์ทแล้วต้องเริ่มใหม่ (ปลอดภัยกว่าค้าง) */
@@ -23,7 +26,12 @@ export function startWipe(ctx: Ctx, couple: Couple) {
 }
 
 /** postback wipe:* · คืนข้อความตอบกลับ หรือ null ถ้าไม่ใช่ของเรา */
-export function onWipePostback(ctx: Ctx, couple: Couple, memberId: number, data: string) {
+export function onWipePostback(ctx: Ctx, couple: Couple, memberId: number, data: string): Message[] | null {
+  const r = wipeStep(ctx, couple, memberId, data)
+  return r && (Array.isArray(r) ? r : [r])
+}
+
+function wipeStep(ctx: Ctx, couple: Couple, memberId: number, data: string): Message | Message[] | null {
   const m = data.match(/^wipe:(1|2|no):([\w-]{8})$/)
   if (!m) return null
   const p = pending.get(couple.id)
@@ -45,10 +53,31 @@ export function onWipePostback(ctx: Ctx, couple: Couple, memberId: number, data:
   }
   if (m[1] === '2' && p.step === 2) {
     pending.delete(couple.id)
-    wipeCouple(ctx, couple.id, memberId)
-    return { type: 'text', text: 'ลบข้อมูลทั้งหมดของกลุ่มนี้แล้ว 🗑️ ถ้าจะใช้ต่อ พิมพ์รายการได้เลย (เริ่มใหม่จากศูนย์)' }
+    const r = wipeWithBackup(ctx, couple.id, memberId)
+    if (!r.ok) return { type: 'text', text: 'สำรองข้อมูลไม่สำเร็จ จึงยังไม่ได้ลบอะไร 🙏 ลองใหม่ภายหลัง' }
+    return wipedMessages(ctx)
   }
   return { type: 'text', text: 'ต้องกดยืนยันตามลำดับ พิมพ์ "ลบข้อมูลทั้งหมด" ใหม่' }
+}
+
+export function wipedMessages(ctx: Ctx): Message[] {
+  return [
+    { type: 'text', text: 'ลบข้อมูลทั้งหมดของกลุ่มนี้แล้ว 🗑️ ถ้าจะใช้ต่อ พิมพ์รายการได้เลย (เริ่มใหม่จากศูนย์)' },
+    onboardCard(ctx, [], 'เริ่มใหม่: ตั้งค่าหารกัน'),
+  ]
+}
+
+/** สำรอง DB (job backup เดิม) ต้องสำเร็จก่อน แล้วค่อยลบ · ใช้ทั้งคำสั่งแชทและปุ่มในแอป */
+export function wipeWithBackup(ctx: Ctx, coupleId: number, memberId: number | null): { ok: true; file: string } | { ok: false } {
+  let file: string
+  try {
+    file = runBackup(ctx.repo.db, ctx.cfg.backupDir, ctx.cfg.backupKeep, ctx.now()).file
+  } catch (e) {
+    log.error('wipe_backup_failed', { couple: coupleId, message: (e as Error).message })
+    return { ok: false }
+  }
+  wipeCouple(ctx, coupleId, memberId)
+  return { ok: true, file }
 }
 
 /** ลบ couple (cascade ทุกตาราง) + รูปสลิป + QR ของคู่นี้ */

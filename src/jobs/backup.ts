@@ -33,8 +33,14 @@ export function runBackup(db: DatabaseSync, backupDir: string, keep: number, now
 }
 
 if (process.argv[1]?.endsWith('backup.ts')) {
-  const { bootstrap } = await import('../app.ts')
-  const ctx = bootstrap()
-  const r = runBackup(ctx.repo.db, ctx.cfg.backupDir, ctx.cfg.backupKeep)
+  // ไม่ผ่าน bootstrap/openDb เพราะนั่น migrate ก่อน — update.sh สำรองก่อน migrate ต้องได้ schema เดิม
+  const { loadConfig } = await import('../config.ts')
+  const { initLog } = await import('../log.ts')
+  const { DatabaseSync } = await import('node:sqlite')
+  const cfg = loadConfig()
+  initLog(join(cfg.dataDir, 'logs'))
+  const db = new DatabaseSync(join(cfg.dataDir, 'harnkan.db'))
+  const r = runBackup(db, cfg.backupDir, cfg.backupKeep)
+  db.close()
   console.log(JSON.stringify({ job: 'backup', ...r }))
 }

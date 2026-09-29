@@ -39,6 +39,32 @@ function expenseRow(e) {
     <span class="amt">${baht(e.amount)}</span></a></li>`
 }
 
+/** การโอน (เคลียร์ยอด / ปิดยอดเป็น 0) + ปุ่มลบ */
+function settlementRow(s) {
+  const tag = s.kind === 'manual_close' ? 'ปิดยอดเป็น 0' : 'เคลียร์ยอด'
+  return `<li><div class="row">
+    <span class="dot bg${payerSlot(s.from)}" aria-hidden="true"></span>
+    <span class="main"><span class="title">${name(s.from)} โอนให้ ${name(s.to)}</span><span class="meta">${tag}</span></span>
+    <span class="amt">${baht(s.amount)}</span>
+    <button type="button" class="danger small" data-del-settlement="${s.id}" aria-label="ลบ ${tag} ${baht(s.amount)}">ลบ</button></div></li>`
+}
+
+/** กดลบการโอน (ถามยืนยัน) · ใช้ทั้งหน้าวันนี้และประวัติ */
+function onSettlementDelete(root, after) {
+  root.addEventListener('click', async (ev) => {
+    const b = /** @type {HTMLElement} */ (ev.target).closest('[data-del-settlement]')
+    if (!b) return
+    if (!confirm('ลบการโอนนี้? ยอดจะกลับไปเท่าก่อนบันทึก')) return
+    try {
+      await api.deleteSettlement(Number(/** @type {HTMLElement} */ (b).dataset.delSettlement))
+      toast('ลบแล้ว')
+      await after()
+    } catch (e) {
+      showError(/** @type {Error} */ (e).message)
+    }
+  })
+}
+
 // ---------- หน้า: วันนี้ ----------
 async function viewToday() {
   const t = await api.today()
@@ -53,7 +79,23 @@ async function viewToday() {
     </section>
     <h2>รายการวันนี้ (${t.expenses.length})</h2>
     ${t.expenses.length ? `<ul class="list">${t.expenses.map(expenseRow).join('')}</ul>` : '<p class="muted">ยังไม่มีรายการ พิมพ์ในกลุ่ม LINE เช่น "กาแฟ 90" หรือกดเพิ่มด้านล่าง</p>'}
+    ${t.settlements?.length ? `<h2>การโอนวันนี้</h2><ul class="list" data-testid="settlements">${t.settlements.map(settlementRow).join('')}</ul>` : ''}
+    ${t.ignored_slips?.length ? `<h2>สลิปที่ไม่นับ</h2><ul class="list" data-testid="ignored">${t.ignored_slips.map((s) => `<li><div class="row">
+      <span class="main"><span class="title">${esc(s.label)}</span><span class="meta">${name(s.member_id)}ส่ง · ไม่นับเข้ายอด</span></span>
+      <span class="amt">${baht(s.amount)}</span><button type="button" class="secondary small" data-count="${s.id}">นับ</button></div></li>`).join('')}</ul>` : ''}
     <a class="btn fab" href="#/add">＋ เพิ่มรายการ</a>`
+  onSettlementDelete($app(), route) // route() สร้าง #app ใหม่ กัน listener ซ้อน
+  $app().querySelector('[data-testid=ignored]')?.addEventListener('click', async (ev) => {
+    const b = /** @type {HTMLElement} */ (ev.target).closest('[data-count]')
+    if (!b) return
+    try {
+      await api.countSlip(Number(/** @type {HTMLElement} */ (b).dataset.count))
+      toast('นับเป็นค่าใช้จ่ายแล้ว')
+      await route()
+    } catch (e) {
+      showError(/** @type {Error} */ (e).message)
+    }
+  })
 }
 
 // ---------- ฟอร์มรายการ (เพิ่ม/แก้ไข) ----------
@@ -197,7 +239,23 @@ async function viewSettle() {
       <li><b>มือถือเครื่องเดียว:</b> กด "บันทึกรูป QR" → เปิดแอปธนาคาร → สแกน → เลือกรูปจากคลังภาพ</li>
       <li><b>สองเครื่อง:</b> เปิดหน้านี้ค้างไว้ แล้วใช้แอปธนาคารอีกเครื่องสแกนจากจอ</li>
     </ol>
-    <p class="muted">โอนแล้วส่งสลิปในกลุ่ม LINE บอทจะปิดยอดให้</p>`
+    <p class="muted">โอนแล้วส่งสลิปในกลุ่ม LINE บอทจะปิดยอดให้</p>
+    <h2>เคลียร์กันนอกแอปแล้ว?</h2>
+    <p class="muted">ปิดยอดให้เป็น 0 โดยไม่ต้องส่งสลิป · ประวัติยังอยู่ครบ ลบทีหลังได้ (ยอดจะกลับมา)</p>
+    <button type="button" class="secondary" data-act="close">ปิดยอดเป็น 0</button>`
+  $app().querySelector('[data-act=close]')?.addEventListener('click', async () => {
+    const now = (await api.today()).net
+    if (!now) return toast('ยอดเป็น 0 อยู่แล้ว')
+    const who = netSentence(now, me.members)
+    if (!confirm(`ปิดยอด ${who} ${baht(Math.abs(now))} ให้เป็น 0 ใช่ไหม? ประวัติยังอยู่ครบ`)) return
+    try {
+      await api.closeBalance()
+      toast('ปิดยอดแล้ว')
+      await route()
+    } catch (e) {
+      showError(/** @type {Error} */ (e).message)
+    }
+  })
   $app().querySelector('[data-copy]')?.addEventListener('click', async (ev) => {
     const v = /** @type {HTMLElement} */ (ev.currentTarget).dataset.copy ?? ''
     try {
@@ -237,11 +295,18 @@ async function viewHistory(month, selected) {
     const el = /** @type {HTMLElement} */ ($app().querySelector('#day-detail'))
     el.innerHTML = `<h2>${thaiDate(date)}</h2>
       ${x && x.net !== null ? `<p>${esc(netSentence(x.net, me.members))} ${x.net ? baht(Math.abs(x.net)) : ''} ${x.settled ? '· เคลียร์แล้ว ✅' : ''}</p>` : ''}
-      ${d.expenses.length ? `<ul class="list">${d.expenses.map(expenseRow).join('')}</ul>` : '<p class="muted">ไม่มีรายการ</p>'}`
+      ${d.expenses.length ? `<ul class="list">${d.expenses.map(expenseRow).join('')}</ul>` : '<p class="muted">ไม่มีรายการ</p>'}
+      ${d.settlements?.length ? `<h2>การโอน</h2><ul class="list">${d.settlements.map(settlementRow).join('')}</ul>` : ''}`
   }
+  let selectedDate = selected
+  onSettlementDelete($app(), async () => {
+    const target = `#/history/${m}/${selectedDate}`
+    if (location.hash === target) await route()
+    else location.hash = target
+  })
   $app().querySelector('.cal')?.addEventListener('click', (ev) => {
     const b = /** @type {HTMLElement} */ (ev.target).closest('button')
-    if (b?.dataset.date) showDay(b.dataset.date)
+    if (b?.dataset.date) showDay((selectedDate = b.dataset.date))
   })
   if (selected) await showDay(selected)
 }
@@ -257,8 +322,12 @@ async function viewSettings() {
       <h2>ของฉัน</h2>
       <label for="display_name">ชื่อที่แสดง</label><input id="display_name" maxlength="40" aria-describedby="display_name-error" value="${esc(mine.display_name)}">
       <p class="field-error" id="display_name-error" role="alert" hidden></p>
-      <label for="promptpay_id">เบอร์พร้อมเพย์ (รับเงิน)</label><input id="promptpay_id" inputmode="numeric" placeholder="เบอร์มือถือ 10 หลัก" value="${esc(mine.promptpay_id ?? '')}">
-      <label for="bank_names">ชื่อบัญชีตามสลิป (คั่นด้วย ,)</label><input id="bank_names" placeholder="ชื่อ นามสกุล ตามแอปธนาคาร" value="${esc((mine.bank_names ?? []).join(', '))}">
+      <label for="promptpay_id">เบอร์พร้อมเพย์ (รับเงิน)</label><input id="promptpay_id" inputmode="numeric" placeholder="เบอร์มือถือ 10 หลัก" aria-describedby="promptpay_id-help" value="${esc(mine.promptpay_id ?? '')}">
+      <p class="help" id="promptpay_id-help">ใช้สร้าง QR ตอนสรุป ถ้าบัญชีไม่ผูกพร้อมเพย์ให้เว้นว่าง</p>
+      <label for="bank_names">ชื่อบัญชีตามสลิป</label><input id="bank_names" placeholder="เช่น สมชาย" aria-describedby="bank_names-help" value="${esc((mine.bank_names ?? []).join(', '))}">
+      <p class="help" id="bank_names-help">ชื่อต้นตามที่ขึ้นบนสลิป ไม่ต้องมีนาย/นามสกุล คั่นหลายชื่อด้วย ,</p>
+      <label for="account_suffixes">เลขท้ายบัญชี 4 ตัว</label><input id="account_suffixes" inputmode="numeric" placeholder="เช่น 1234" aria-describedby="account_suffixes-help" value="${esc((mine.account_suffixes ?? []).join(', '))}">
+      <p class="help" id="account_suffixes-help">ดูจากสลิปที่เคยโอน ช่องที่เป็น xxx-xxx-1234 · ไม่บังคับ แต่ทำให้แม่นขึ้น · หลายบัญชีคั่นด้วย ,</p>
       <h2>ของคู่เรา</h2>
       <label for="settle_time">เวลาสรุปยอด</label><input id="settle_time" type="time" value="${esc(s.settle_time)}">
       <label for="min_transfer">ยอดขั้นต่ำที่จะเรียกเก็บ (บาท)</label><input id="min_transfer" inputmode="decimal" value="${s.min_transfer / 100}">
@@ -266,16 +335,40 @@ async function viewSettings() {
       <select id="default_split">${['half', 'mine', 'theirs', 'treat'].map((m) => `<option value="${m}" ${m === s.default_split ? 'selected' : ''}>${{ half: 'หารครึ่ง', mine: 'ของคนจ่าย', theirs: 'ของอีกคน', treat: 'เลี้ยง' }[m]}</option>`).join('')}</select>
       <label for="ai_daily_cap">อ่านสลิปด้วย AI สูงสุดต่อวัน (รูป)</label><input id="ai_daily_cap" inputmode="numeric" value="${s.ai_daily_cap}">
       <label for="slip_retention_days">เก็บรูปสลิปกี่วัน</label><input id="slip_retention_days" inputmode="numeric" value="${s.slip_retention_days}">
+      <label for="stale_slip_hours">สลิปเก่ากว่ากี่ชั่วโมงให้ถามก่อนนับ</label><input id="stale_slip_hours" inputmode="numeric" aria-describedby="stale_slip_hours-help" value="${s.stale_slip_hours ?? 24}">
+      <p class="help" id="stale_slip_hours-help">0 = ไม่ถาม บันทึกทุกสลิปทันที</p>
+      <label for="pending_answer_hours">ถ้าไม่ตอบภายในกี่ชั่วโมง ถือว่าไม่นับ</label><input id="pending_answer_hours" inputmode="numeric" value="${s.pending_answer_hours ?? 24}">
       <div class="actions"><button type="submit">บันทึกการตั้งค่า</button></div>
-    </form>`
+    </form>
+    <section class="danger-zone" aria-labelledby="danger-h">
+      <h2 id="danger-h">โซนอันตราย</h2>
+      <p>ลบข้อมูลทั้งหมดของกลุ่มนี้: รายการ การโอน สลิป รูป และประวัติ · ระบบสำรอง DB ก่อนลบ แต่ในแอป<b>ย้อนกลับไม่ได้</b></p>
+      <button type="button" class="danger" data-act="wipe">ลบข้อมูลทั้งหมด</button>
+    </section>`
+  $app().querySelector('[data-act=wipe]')?.addEventListener('click', async () => {
+    try {
+      const n = await api.wipeInfo()
+      if (!confirm(`จะลบ: รายการ ${n.expenses} · การโอน ${n.settlements} · สลิป ${n.slips} · สรุปรายวัน ${n.summaries}\nย้อนกลับไม่ได้ ต้องการลบต่อไหม?`)) return
+      const typed = prompt('ยืนยันขั้นสุดท้าย: พิมพ์คำว่า "ลบ"')
+      if (typed === null) return
+      if (typed.trim() !== 'ลบ') return toast('ไม่ได้พิมพ์ "ลบ" — ยกเลิก ข้อมูลยังอยู่ครบ')
+      await api.wipeAll(typed.trim())
+      toast('ลบข้อมูลทั้งหมดแล้ว')
+      $app().innerHTML = '<h1>ลบข้อมูลทั้งหมดแล้ว</h1><p class="muted">พิมพ์อะไรก็ได้ในกลุ่ม LINE เพื่อเริ่มใหม่</p>'
+    } catch (e) {
+      showError(/** @type {Error} */ (e).message)
+    }
+  })
   $app().querySelector('#settings')?.addEventListener('submit', async (ev) => {
     ev.preventDefault()
     const v = (id) => /** @type {HTMLInputElement} */ ($app().querySelector(`#${id}`)).value.trim()
+    const list = (id) => (v(id) ? v(id).split(',').map((x) => x.trim()).filter(Boolean) : [])
     const patch = {
       // ส่งชื่อเฉพาะเมื่อเปลี่ยน — ชื่อจากโปรไฟล์ LINE เดิมอาจไม่ผ่านกฎใหม่ แต่ต้องยังบันทึกค่าอื่นได้
       ...(v('display_name') !== mine.display_name ? { display_name: v('display_name') } : {}), settle_time: v('settle_time'), default_split: v('default_split'),
       min_transfer: parseAmount(v('min_transfer') || '0') ?? -1, ai_daily_cap: Number(v('ai_daily_cap')), slip_retention_days: Number(v('slip_retention_days')),
-      promptpay_id: v('promptpay_id') || null, bank_names: v('bank_names') ? v('bank_names').split(',').map((x) => x.trim()).filter(Boolean) : [],
+      stale_slip_hours: Number(v('stale_slip_hours')), pending_answer_hours: Number(v('pending_answer_hours')),
+      promptpay_id: v('promptpay_id') || null, bank_names: list('bank_names'), account_suffixes: list('account_suffixes'),
     }
     const nameInput = /** @type {HTMLInputElement} */ ($app().querySelector('#display_name'))
     const nameError = /** @type {HTMLElement} */ ($app().querySelector('#display_name-error'))

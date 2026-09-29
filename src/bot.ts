@@ -9,6 +9,7 @@ import { businessDay } from './domain/time.js'
 import { expenseCard, netText } from './line/flex.ts'
 import type { Handlers, LineEvent } from './line/router.ts'
 import { onAwaitingAmount, onImage, onSlipPostback } from './slip/flow.ts'
+import { nudge, onboardCard } from './onboard.ts'
 import { carrySummary } from './settle.ts'
 import { onWipePostback, startWipe } from './wipe.ts'
 
@@ -20,7 +21,8 @@ export const HELP = [
   '• "ข้าวเย็น 420 เลี้ยง" → เลี้ยง ไม่นับเข้ายอด',
   '• "ครีมกันแดดของบี 359" → ของอีกคนทั้งหมด',
   '• ส่งรูปสลิป/ใบเสร็จ → อ่านยอดให้',
-  '• "สรุป" ดูยอดตอนนี้ · "ยกเลิก" ลบรายการล่าสุดของคุณ',
+  '• "สรุป" ดูยอดตอนนี้ · "ยกเลิก" ลบรายการล่าสุดของคุณ (รวมการโอน)',
+  '• "ตั้งค่า" ดูเช็กลิสต์ตั้งค่า',
   '• "ตั้งชื่อ ส้ม" เปลี่ยนชื่อที่บอทใช้เรียกคุณ',
   '• 21:00 สรุปยอดโอนเดียว + QR พร้อมเพย์',
 ].join('\n')
@@ -60,6 +62,7 @@ async function onText(ctx: Ctx, ev: LineEvent, who: Who) {
 
   if (intent.kind === 'command') {
     if (intent.command === 'help') return replyText(ctx, ev, HELP)
+    if (intent.command === 'setup') return void (ev.replyToken && (await ctx.line.reply(ev.replyToken, [onboardCard(ctx, who.members)])))
     if (intent.command === 'rename') {
       const r = validateName(intent.name, who.members.filter((m) => m.id !== who.member.id).map((m) => m.display_name))
       if (!r.ok) return replyText(ctx, ev, `เปลี่ยนชื่อไม่ได้: ${r.error}`)
@@ -74,10 +77,18 @@ async function onText(ctx: Ctx, ev: LineEvent, who: Who) {
       return replyText(ctx, ev, `ยอดตอนนี้: ${netText(l.net, who.members)}\n(${l.expenses.length} รายการวันนี้)${extra}`)
     }
     if (intent.command === 'undo') {
-      const last = repo.lastExpenseBy(who.couple.id, who.member.id)
+      const last = repo.lastRecordBy(who.couple.id, who.member.id)
       if (!last) return replyText(ctx, ev, 'ยังไม่มีรายการของคุณให้ยกเลิก')
-      repo.deleteExpense(last.id, who.member.id, day)
-      return replyText(ctx, ev, `ลบ "${last.merchant} ${formatBaht(last.amount_satang)}" แล้ว\nยอดตอนนี้: ${netText(repo.ledger(who.couple.id, day).net, who.members)}`)
+      let what: string
+      if (last.entity === 'expense') {
+        repo.deleteExpense(last.row.id, who.member.id, day)
+        what = `${last.row.merchant} ${formatBaht(last.row.amount_satang)}`
+      } else {
+        repo.deleteSettlement(last.row.id, who.member.id, day)
+        const name = (id: number) => who.members.find((m) => m.id === id)?.display_name ?? '?'
+        what = `${last.row.kind === 'manual_close' ? 'ปิดยอด' : 'โอน'} ${name(last.row.from_member)} → ${name(last.row.to_member)} ${formatBaht(last.row.amount_satang)}`
+      }
+      return replyText(ctx, ev, `ลบ "${what}" แล้ว\nยอดตอนนี้: ${netText(repo.ledger(who.couple.id, day).net, who.members)}`)
     }
     if (ev.replyToken) await ctx.line.reply(ev.replyToken, [startWipe(ctx, who.couple)])
     return
@@ -89,14 +100,14 @@ async function onText(ctx: Ctx, ev: LineEvent, who: Who) {
     coupleId: who.couple.id, paidBy: who.member.id, amount: intent.amount, merchant: intent.merchant.slice(0, 60),
     occurredAt: nowIso(ctx), day, mode, source: 'text', createdBy: who.member.id, createdAt: nowIso(ctx),
   })
-  if (ev.replyToken) await ctx.line.reply(ev.replyToken, [expenseCard(e, who.members, repo.ledger(who.couple.id, day).net)])
+  if (ev.replyToken) await ctx.line.reply(ev.replyToken, [expenseCard(e, who.members, repo.ledger(who.couple.id, day).net), ...nudge(ctx, who.couple, who.members, day)])
 }
 
 async function onPostback(ctx: Ctx, ev: LineEvent, who: Who) {
   const data = ev.postback?.data ?? ''
   if (await onSlipPostback(ctx, ev, who, data)) return
   const wipe = onWipePostback(ctx, who.couple, who.member.id, data)
-  if (wipe) return void (ev.replyToken && (await ctx.line.reply(ev.replyToken, [wipe])))
+  if (wipe) return void (ev.replyToken && (await ctx.line.reply(ev.replyToken, wipe)))
   const carry = data.match(/^carry:(\d+)$/)
   if (carry) {
     const text = carrySummary(ctx, who.couple, Number(carry[1]), who.member.id)

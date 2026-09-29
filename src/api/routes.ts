@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import QRCode from 'qrcode'
 import type { Ctx } from '../app.ts'
-import type { Couple, CoupleSettings, Expense, ExpensePatch, Member } from '../db/repo.ts'
+import type { Couple, CoupleSettings, Expense, ExpensePatch, Member, Settlement, Slip } from '../db/repo.ts'
 import { decide } from '../domain/balance.js'
 import { effect, MODES } from '../domain/split.js'
 import type { SplitMode } from '../domain/split.js'
@@ -11,6 +11,10 @@ import { addDays, businessDay } from '../domain/time.js'
 import { isPromptpayId, promptpayPayload } from '../promptpay/qr.ts'
 import { validateName } from '../domain/name.js'
 import { HttpError, readBody, send } from '../http.ts'
+import { closeBalance } from '../settle.ts'
+import { classify, PENDING_ANSWER_HOURS, SELF_MERCHANT, STALE_SLIP_HOURS } from '../slip/classify.ts'
+import { fixSlip } from '../slip/flow.ts'
+import { wipedMessages, wipeWithBackup } from '../wipe.ts'
 
 export const API_MAX_BYTES = 16 * 1024
 
@@ -72,14 +76,33 @@ export function expenseJson(e: Expense) {
     category: e.category, source: e.source, slip_id: e.slip_id, status: e.status,
   }
 }
-const memberJson = (m: Member) => ({ id: m.id, display_name: m.display_name, promptpay_id: m.promptpay_id, bank_names: JSON.parse(m.bank_names) as string[] })
+const memberJson = (m: Member) => ({
+  id: m.id, display_name: m.display_name, promptpay_id: m.promptpay_id, bank_names: JSON.parse(m.bank_names) as string[],
+  account_suffixes: JSON.parse(m.account_suffixes || '[]') as string[],
+})
 const settingsJson = (c: Couple, cfg: Ctx['cfg']) => ({
   settle_time: c.settle_time, min_transfer: c.min_transfer, default_split: c.default_split,
   ai_daily_cap: c.ai_daily_cap ?? cfg.aiDailyCap, slip_retention_days: c.slip_retention_days ?? cfg.slipRetentionDays,
+  stale_slip_hours: c.stale_slip_hours ?? STALE_SLIP_HOURS, pending_answer_hours: c.pending_answer_hours ?? PENDING_ANSWER_HOURS,
 })
+const settlementJson = (s: Settlement) => ({ id: s.id, from: s.from_member, to: s.to_member, amount: s.amount_satang, kind: s.kind, day: s.day, summary_id: s.summary_id, slip_id: s.slip_id })
 
-/** ยอดที่ควรโอนตอนนี้: สรุปล่าสุดที่ยังค้าง ถ้าไม่มีใช้ยอดสด */
+/** สลิปที่ "ไม่นับ" (7 วันล่าสุด) ให้กดนับทีหลังได้ · ชื่อรายการตามกฎเดียวกับตอนบันทึก (บุคคลอื่นไม่ใช้ชื่อบนสลิป) */
+function ignoredSlips(ctx: Ctx, a: Auth) {
+  const now = ctx.now()
+  ctx.repo.expireStaleSlips(a.couple.id, new Date(now - (a.couple.pending_answer_hours ?? PENDING_ANSWER_HOURS) * 3600_000).toISOString())
+  return ctx.repo.ignoredSlips(a.couple.id, new Date(now - 7 * 86400_000).toISOString()).map((s: Slip) => {
+    const ai = s.ai_json ? JSON.parse(s.ai_json) : null
+    const poster = a.members.find((m) => m.id === s.member_id)
+    const c = ai && poster ? classify({ ...ai, amount: s.amount_satang! / 100 }, poster, a.members) : null
+    const label = c?.kind === 'expense' ? c.merchant : c?.kind === 'self' ? SELF_MERCHANT : c?.kind === 'settlement' ? 'โอนระหว่างคู่' : 'สลิป'
+    return { id: s.id, amount: s.amount_satang, label, member_id: s.member_id, created_at: s.created_at }
+  })
+}
+
+/** ยอดที่ควรโอนตอนนี้: สรุปล่าสุดที่ยังค้าง ถ้าไม่มีใช้ยอดสด · ยอดสดเป็น 0 = ไม่มีใครติดใคร (เช่นหลังปิดยอดเป็น 0) */
 function pending(ctx: Ctx, a: Auth, day: string) {
+  if (ctx.repo.ledger(a.couple.id, day).net === 0) return null
   const open = ctx.repo.latestSummary(a.couple.id, '9999-12-31')
   const net = open && !open.settled && ctx.repo.outstanding(open) !== 0 ? ctx.repo.outstanding(open) : ctx.repo.ledger(a.couple.id, day).net
   const d = decide(net, 0)
@@ -111,8 +134,8 @@ export async function handleApi(ctx: Ctx, req: IncomingMessage, res: ServerRespo
     const l = repo.ledger(a.couple.id, today)
     return send(res, 200, {
       day: today, net: l.net, carried_in: l.carriedIn, adjustments: l.adjustments, expenses: l.expenses.map(expenseJson),
-      settlements: repo.unmatchedSettlements(a.couple.id, today).map((s) => ({ id: s.id, from: s.from_member, to: s.to_member, amount: s.amount_satang })),
-      pending: pending(ctx, a, today),
+      settlements: repo.settlementsByDay(a.couple.id, today).map(settlementJson),
+      pending: pending(ctx, a, today), ignored_slips: ignoredSlips(ctx, a),
     }), true
   }
   if (M === 'GET' && p === '/api/days') {
@@ -133,7 +156,34 @@ export async function handleApi(ctx: Ctx, req: IncomingMessage, res: ServerRespo
   }
   if (M === 'GET' && (m = p.match(/^\/api\/days\/(\d{4}-\d{2}-\d{2})$/))) {
     const s = repo.summary(a.couple.id, m[1])
-    return send(res, 200, { date: m[1], expenses: repo.expensesByDay(a.couple.id, m[1]).map(expenseJson), summary: s ?? null }), true
+    return send(res, 200, { date: m[1], expenses: repo.expensesByDay(a.couple.id, m[1]).map(expenseJson), settlements: repo.settlementsByDay(a.couple.id, m[1]).map(settlementJson), summary: s ?? null }), true
+  }
+  if (M === 'DELETE' && (m = p.match(/^\/api\/settlements\/(\d{1,12})$/))) {
+    const st = repo.settlement(Number(m[1]))
+    if (!st || st.couple_id !== a.couple.id || st.status !== 'active') throw new HttpError(404, 'ไม่พบรายการ')
+    return send(res, 200, { settlement: settlementJson(repo.deleteSettlement(st.id, a.member.id, today)), net: repo.ledger(a.couple.id, today).net }), true
+  }
+  if (M === 'POST' && p === '/api/settle/close') {
+    const r = await closeBalance(ctx, a.couple, a.member)
+    if (!r) throw bad('ยอดเป็น 0 อยู่แล้ว')
+    return send(res, 200, { ...r, net_after: repo.ledger(a.couple.id, today).net }), true
+  }
+  if (M === 'POST' && (m = p.match(/^\/api\/slips\/(\d{1,12})\/count$/))) {
+    const s = repo.slip(Number(m[1]))
+    if (!s || s.couple_id !== a.couple.id || !s.ignored || !s.amount_satang) throw new HttpError(404, 'ไม่พบสลิปที่ไม่นับ')
+    fixSlip(ctx, a, s, 'count', a.member.id)
+    return send(res, 200, { net: repo.ledger(a.couple.id, today).net }), true
+  }
+  if (p === '/api/wipe') {
+    if (M === 'GET') return send(res, 200, repo.wipeCounts(a.couple.id)), true
+    if (M === 'POST') {
+      const b = await jsonBody(req)
+      if (b.confirm !== 'ลบ') throw bad('ต้องพิมพ์คำว่า "ลบ" เพื่อยืนยัน')
+      const r = wipeWithBackup(ctx, a.couple.id, a.member.id)
+      if (!r.ok) throw new HttpError(503, 'สำรองข้อมูลไม่สำเร็จ จึงยังไม่ได้ลบอะไร')
+      await ctx.line.push(a.couple.line_group_id, [{ type: 'text', text: `${a.member.display_name} ลบข้อมูลทั้งหมดจากแอปแล้ว (สำรองไว้ก่อนลบ)` }, ...wipedMessages(ctx).slice(1)])
+      return send(res, 200, { ok: true }), true
+    }
   }
   if ((m = p.match(/^\/api\/expenses\/(\d{1,12})$/))) {
     const e = ownExpense(ctx, a, m[1])
@@ -218,6 +268,15 @@ export async function handleApi(ctx: Ctx, req: IncomingMessage, res: ServerRespo
       } else if (k === 'bank_names') {
         if (!Array.isArray(v) || v.length > 5 || !v.every((x) => typeof x === 'string' && x.trim() && x.length <= 60)) throw bad('bank_names ต้องเป็นรายชื่อไม่เกิน 5 ชื่อ')
         me.bank_names = v.map((x: string) => x.trim())
+      } else if (k === 'stale_slip_hours') {
+        if (v !== null && !isInt(v, 0, 720)) throw bad('stale_slip_hours ต้องเป็น 0–720 (0 = ไม่ถาม)')
+        c.stale_slip_hours = v as number | null
+      } else if (k === 'pending_answer_hours') {
+        if (v !== null && !isInt(v, 1, 168)) throw bad('pending_answer_hours ต้องเป็น 1–168')
+        c.pending_answer_hours = v as number | null
+      } else if (k === 'account_suffixes') {
+        if (!Array.isArray(v) || v.length > 5 || !v.every((x) => typeof x === 'string' && /^\d{4}$/.test(x))) throw bad('เลขท้ายบัญชีต้องเป็นเลข 4 หลัก ไม่เกิน 5 บัญชี')
+        me.account_suffixes = v as string[]
       } else if (k === 'display_name') {
         const r = validateName(v, a.members.filter((m) => m.id !== a.member.id).map((m) => m.display_name))
         if (!r.ok) throw new HttpError(400, r.error, 'display_name')

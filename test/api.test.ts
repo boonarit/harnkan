@@ -151,7 +151,7 @@ test('ตั้งค่าเก็บใน DB แก้ได้โดยไ�
   try {
     const r = await call(A, 'PATCH', '/api/settings', { min_transfer: 10000, settle_time: '22:00', default_split: 'mine', ai_daily_cap: 5, slip_retention_days: 90, promptpay_id: '080-000-0001', bank_names: ['เอ สมมติ'] })
     assert.equal(r.status, 200)
-    assert.deepEqual(r.body.settings, { settle_time: '22:00', min_transfer: 10000, default_split: 'mine', ai_daily_cap: 5, slip_retention_days: 90 })
+    assert.deepEqual(r.body.settings, { settle_time: '22:00', min_transfer: 10000, default_split: 'mine', ai_daily_cap: 5, slip_retention_days: 90, stale_slip_hours: 24, pending_answer_hours: 24 })
     assert.equal(repo.couple(couple.id)!.min_transfer, 10000)
     assert.equal(repo.memberByLineUser(couple.id, A_ID)!.promptpay_id, '0800000001')
     assert.equal(repo.auditFor('couple', couple.id).at(-1)!.action, 'settings')

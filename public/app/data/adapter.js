@@ -5,6 +5,7 @@
 //
 // เมธอด: me() · today() · days(month) · day(date) · expense(id) · addExpense(body) · updateExpense(id, patch)
 //        deleteExpense(id) · saveSettings(patch) · settleQr() · slipImage(id)
+//        deleteSettlement(id) · closeBalance() · countSlip(id) · wipeInfo() · wipeAll(confirm)
 import { dailyNet } from '#domain/balance.js'
 import { effect, splitShares } from '#domain/split.js'
 import { businessDay } from '#domain/time.js'
@@ -66,6 +67,14 @@ export class ApiAdapter {
   deleteExpense(id) { return this.call('DELETE', `/expenses/${id}`) }
   /** @param {object} patch */
   saveSettings(patch) { return this.call('PATCH', '/settings', patch) }
+  /** @param {number} id */
+  deleteSettlement(id) { return this.call('DELETE', `/settlements/${id}`) }
+  closeBalance() { return this.call('POST', '/settle/close') }
+  /** @param {number} id สลิปที่ไม่นับ → นับเป็นค่าใช้จ่าย */
+  countSlip(id) { return this.call('POST', `/slips/${id}/count`) }
+  wipeInfo() { return this.call('GET', '/wipe') }
+  /** @param {string} confirm ต้องเป็น "ลบ" */
+  wipeAll(confirm) { return this.call('POST', '/wipe', { confirm }) }
   /** @returns {Promise<string | null>} object URL ของรูป QR */
   async settleQr() {
     try { return URL.createObjectURL(await this.call('GET', '/settle/qr.png', undefined, true)) } catch { return null }
@@ -81,7 +90,7 @@ export class ApiAdapter {
  *   day: string, occurred_at: string, source: string, slip_id: number | null, category: string | null, status: string, created_by: number }} LocalExpense
  * @typedef {{ members: { id: number, display_name: string, promptpay_id: string | null, bank_names: string[] }[],
  *   settings: { settle_time: string, min_transfer: number, default_split: string, ai_daily_cap: number, slip_retention_days: number },
- *   expenses: LocalExpense[], settlements: { id: number, from: number, to: number, amount: number, day: string }[],
+ *   expenses: LocalExpense[], settlements: { id: number, from: number, to: number, amount: number, day: string, kind?: string }[],
  *   settled_days: string[], audit: { entity_id: number, action: string, member_id: number }[], seq: number, me: number }} LocalState
  */
 
@@ -151,7 +160,7 @@ export class LocalAdapter {
     const from = net > 0 ? 1 : 0
     const to = 1 - from
     return {
-      day, net, carried_in: carried, adjustments: 0, expenses: d.expenses, settlements: s.settlements.filter((x) => x.day === day),
+      day, net, carried_in: carried, adjustments: 0, expenses: d.expenses, settlements: s.settlements.filter((x) => x.day === day), ignored_slips: [],
       pending: net ? { amount: Math.abs(net), from: s.members[from].id, to: s.members[to].id, promptpay_id: s.members[to].promptpay_id, summary_date: null } : null,
     }
   }
@@ -176,7 +185,7 @@ export class LocalAdapter {
   /** @param {string} date */
   async day(date) {
     const s = this.state
-    return { date, expenses: this.dayNet(s, date).expenses, summary: null }
+    return { date, expenses: this.dayNet(s, date).expenses, settlements: s.settlements.filter((x) => x.day === date), summary: null }
   }
   /** @param {number} id */
   async expense(id) {
@@ -244,6 +253,37 @@ export class LocalAdapter {
     if (me) for (const k of ['promptpay_id', 'bank_names', 'display_name']) if (p[k] !== undefined) /** @type {any} */ (me)[k] = p[k]
     this.save(s)
     return { settings: s.settings, members: s.members }
+  }
+  /** @param {number} id */
+  async deleteSettlement(id) {
+    const s = this.state
+    const i = s.settlements.findIndex((x) => x.id === id)
+    if (i < 0) throw new ApiError(404, 'ไม่พบรายการ')
+    s.settlements.splice(i, 1)
+    this.save(s)
+    return { net: (await this.today()).net }
+  }
+  /** ปิดยอดเป็น 0 = บันทึกการโอนเท่ายอดตอนนี้ (ลบทีหลังได้) */
+  async closeBalance() {
+    const t = await this.today()
+    if (!t.net) throw new ApiError(400, 'ยอดเป็น 0 อยู่แล้ว')
+    const s = this.state
+    const [from, to] = t.net > 0 ? [s.members[1], s.members[0]] : [s.members[0], s.members[1]]
+    s.settlements.push({ id: ++s.seq, from: from.id, to: to.id, amount: Math.abs(t.net), day: this.todayDay, kind: 'manual_close' })
+    this.save(s)
+    return { amount: Math.abs(t.net), net_after: 0 }
+  }
+  /** @param {number} _id */
+  async countSlip(_id) { throw new ApiError(404, 'เดโมไม่มีสลิป') }
+  async wipeInfo() {
+    const s = this.state
+    return { expenses: s.expenses.length, settlements: s.settlements.length, slips: 0, summaries: s.settled_days.length }
+  }
+  /** เดโม: กลับไปข้อมูลตัวอย่าง @param {string} confirm */
+  async wipeAll(confirm) {
+    if (confirm !== 'ลบ') throw new ApiError(400, 'ต้องพิมพ์คำว่า "ลบ" เพื่อยืนยัน')
+    this.reset()
+    return { ok: true }
   }
   async settleQr() { return null }
   /** @param {number} _id */

@@ -26,11 +26,14 @@ test('e2e: วันตัวอย่าง → B โอนให้ A ฿347.5
     return { status: r.status, body: r.headers.get('content-type')?.includes('json') ? await r.json() : Buffer.from(await r.arrayBuffer()) }
   }
   try {
-    // เชิญบอทเข้ากลุ่ม + สองคนทักทาย → คู่ + สมาชิก 2 คน (ทักทายปกติบอทเงียบ)
+    // เชิญบอทเข้ากลุ่ม → การ์ดเช็กลิสต์ · สองคนทักทาย → คู่ + สมาชิก 2 คน + reply ความคืบหน้า (B17: เดิมเงียบ)
     let out = await hook(ev.join())
     assert.match(json(out), /หารกันพร้อมแล้ว/)
+    assert.match(json(out), /ลงทะเบียนครบ 2 คน \(0\/2\)/)
     out = await hook(ev.text(A_ID, 'อรุณสวัสดิ์'), ev.text(B_ID, 'หวัดดีจ้า'))
-    assert.equal(out.length, 0)
+    assert.deepEqual(out.map((o) => o.kind), ['reply', 'reply'])
+    assert.match(json([out[0]]), /ลงทะเบียน เอ แล้ว ✓ รออีก 1 คน/)
+    assert.match(json([out[1]]), /ลงทะเบียน บี แล้ว ✓ พร้อมใช้แล้ว ✨/)
     const couple = repo.coupleByGroup('C_fake_group')!
     assert.deepEqual(repo.members(couple.id).map((m) => m.display_name), ['เอ', 'บี'])
 
@@ -115,6 +118,8 @@ test('e2e: วันตัวอย่าง → B โอนให้ A ฿347.5
     assert.match(json(out), /ไม่มีใครติดใคร/)
     const h = (await (await fetch(`${srv.base}/healthz`)).json()) as any
     assert.equal(h.stale, false)
+    // ใช้งานปกติทั้งวัน push แค่การ์ดสรุป 21:00 ครั้งเดียว (B17 ต้องไม่เพิ่ม push)
+    assert.equal(line.sent.push, 1)
   } finally {
     await srv.close()
   }

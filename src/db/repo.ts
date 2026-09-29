@@ -2,14 +2,19 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
 import { dailyNet } from '../domain/balance.js'
 import { effect, splitShares } from '../domain/split.js'
 import type { SplitMode } from '../domain/split.js'
+import { log } from '../log.ts'
 
 export type Slot = 0 | 1
 export type Couple = {
   id: number; line_group_id: string; settle_time: string; min_transfer: number; default_split: SplitMode
-  ai_daily_cap: number | null; slip_retention_days: number | null
+  ai_daily_cap: number | null; slip_retention_days: number | null; stale_slip_hours: number | null; pending_answer_hours: number | null
+  onboard_nudged_on: string | null
 }
-export type CoupleSettings = Partial<Pick<Couple, 'settle_time' | 'min_transfer' | 'default_split' | 'ai_daily_cap' | 'slip_retention_days'>>
-export type Member = { id: number; couple_id: number; line_user_id: string; display_name: string; promptpay_id: string | null; bank_names: string }
+export type CoupleSettings = Partial<Pick<Couple, 'settle_time' | 'min_transfer' | 'default_split' | 'ai_daily_cap' | 'slip_retention_days' | 'stale_slip_hours' | 'pending_answer_hours'>>
+export type Member = {
+  id: number; couple_id: number; line_user_id: string; display_name: string; promptpay_id: string | null; bank_names: string
+  account_suffixes?: string // JSON array เลขท้ายบัญชี 4 หลัก (ไม่มี = ยังไม่ตั้ง)
+}
 export type Expense = {
   id: number; couple_id: number; paid_by: number; amount_satang: number; merchant: string; category: string | null
   occurred_at: string; day: string; split_mode: SplitMode; ratio: number | null; source: 'text' | 'slip' | 'manual'
@@ -20,12 +25,16 @@ export type Slip = {
   id: number; couple_id: number; member_id: number; image_path: string | null; qr_trans_ref: string | null; bank: string | null
   amount_satang: number | null; sender_name: string | null; receiver_name: string | null; ai_json: string | null
   confidence: number | null; kind: 'expense' | 'settlement' | 'unknown'; status: 'pending' | 'await_amount' | 'done'; created_at: string
+  rule: string | null; ignored: number // ignored=1 → "ไม่นับ" (ย้อนได้ สลิปยังอยู่)
 }
 export type Summary = {
   id: number; couple_id: number; date: string; net_satang: number; carried_in: number; paid_satang: number
   action: 'zero' | 'carry' | 'request'; qr_token: string | null; sent_message_id: string | null; settled: number; created_at: string
 }
-export type Settlement = { id: number; couple_id: number; from_member: number; to_member: number; amount_satang: number; day: string; summary_id: number | null; slip_id: number | null }
+export type Settlement = {
+  id: number; couple_id: number; from_member: number; to_member: number; amount_satang: number; day: string; summary_id: number | null; slip_id: number | null
+  status: 'active' | 'deleted'; kind: 'transfer' | 'manual_close'; created_by: number | null; created_at: string
+}
 
 export type NewExpense = {
   coupleId: number; paidBy: number; amount: number; merchant: string; category?: string | null; occurredAt: string; day: string
@@ -91,6 +100,15 @@ export class Repo {
     this.audit(id, 'couple', id, memberId, 'settings', before, after)
     return after
   }
+  /** จด "เตือนตั้งค่าแล้ววันนี้" · คืน true ถ้าวันนี้ยังไม่เคยเตือน (atomic) */
+  markNudged(id: number, day: string) {
+    return Number(this.db.prepare('UPDATE couples SET onboard_nudged_on = ? WHERE id = ? AND (onboard_nudged_on IS NULL OR onboard_nudged_on <> ?)').run(day, id, day).changes) > 0
+  }
+  /** จำนวนสิ่งที่จะหายถ้าลบทั้งหมด (แสดงก่อนยืนยัน) */
+  wipeCounts(id: number) {
+    const n = (t: string) => this.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t} WHERE couple_id = ?`, id)!.n
+    return { expenses: n('expenses'), settlements: n('settlements'), slips: n('slips'), summaries: n('daily_summaries') }
+  }
   deleteCouple(id: number) {
     this.run('DELETE FROM couples WHERE id = ?', id)
   }
@@ -112,12 +130,12 @@ export class Repo {
     const id = this.run('INSERT INTO members (couple_id, line_user_id, display_name) VALUES (?, ?, ?)', coupleId, lineUserId, displayName)
     return this.member(id)!
   }
-  updateMember(id: number, p: Partial<{ display_name: string; promptpay_id: string | null; bank_names: string[] }>) {
+  updateMember(id: number, p: Partial<{ display_name: string; promptpay_id: string | null; bank_names: string[]; account_suffixes: string[] }>) {
     const m = this.member(id)!
     this.run(
-      'UPDATE members SET display_name = ?, promptpay_id = ?, bank_names = ? WHERE id = ?',
+      'UPDATE members SET display_name = ?, promptpay_id = ?, bank_names = ?, account_suffixes = ? WHERE id = ?',
       p.display_name ?? m.display_name, p.promptpay_id !== undefined ? p.promptpay_id : m.promptpay_id,
-      p.bank_names ? JSON.stringify(p.bank_names) : m.bank_names, id,
+      p.bank_names ? JSON.stringify(p.bank_names) : m.bank_names, p.account_suffixes ? JSON.stringify(p.account_suffixes) : m.account_suffixes ?? '[]', id,
     )
     return this.member(id)!
   }
@@ -147,8 +165,16 @@ export class Repo {
   expensesBetween(coupleId: number, from: string, to: string) {
     return this.all<Expense>("SELECT * FROM expenses WHERE couple_id = ? AND day BETWEEN ? AND ? AND status = 'active' ORDER BY day, occurred_at, id", coupleId, from, to).map((r) => this.hydrate(r)!)
   }
-  lastExpenseBy(coupleId: number, memberId: number) {
-    return this.hydrate(this.get("SELECT * FROM expenses WHERE couple_id = ? AND created_by = ? AND status = 'active' ORDER BY id DESC LIMIT 1", coupleId, memberId))
+  /** รายการล่าสุดที่คนนี้สร้างและยังไม่ถูกลบ (expense หรือ settlement) · ลำดับจาก audit_log */
+  lastRecordBy(coupleId: number, memberId: number): { entity: 'expense'; row: Expense } | { entity: 'settlement'; row: Settlement } | undefined {
+    const r = this.get<{ entity: 'expense' | 'settlement'; entity_id: number }>(
+      `SELECT a.entity, a.entity_id FROM audit_log a
+       LEFT JOIN expenses e ON a.entity = 'expense' AND e.id = a.entity_id
+       LEFT JOIN settlements s ON a.entity = 'settlement' AND s.id = a.entity_id
+       WHERE a.couple_id = ? AND a.member_id = ? AND a.action = 'create' AND (e.status = 'active' OR s.status = 'active')
+       ORDER BY a.id DESC LIMIT 1`, coupleId, memberId)
+    if (!r) return undefined
+    return r.entity === 'expense' ? { entity: 'expense', row: this.expense(r.entity_id)! } : { entity: 'settlement', row: this.settlement(r.entity_id)! }
   }
 
   private writeShares(e: { id: number; couple_id: number; amount_satang: number; split_mode: SplitMode; ratio: number | null; paid_by: number }) {
@@ -170,6 +196,7 @@ export class Repo {
       )
       const e = this.get<Expense>('SELECT * FROM expenses WHERE id = ?', id)!
       this.writeShares(e)
+      if (n.slipId) this.run('UPDATE slips SET ignored = 0 WHERE id = ?', n.slipId)
       const full = this.expense(id)!
       this.audit(n.coupleId, 'expense', id, n.createdBy, 'create', null, full)
       return full
@@ -214,6 +241,7 @@ export class Repo {
       const before = this.expense(id)
       if (!before || before.status !== 'active') throw new Error('ไม่พบรายการ')
       this.run("UPDATE expenses SET status = 'deleted' WHERE id = ?", id)
+      if (before.slip_id) this.run('UPDATE slips SET ignored = 1 WHERE id = ?', before.slip_id) // สลิปกลับเป็น "ไม่นับ" กดนับใหม่ได้
       this.adjustIfClosed(before, null, today, 'ลบรายการของวันที่ปิดยอดแล้ว')
       const after = this.expense(id)!
       this.audit(before.couple_id, 'expense', id, memberId, 'delete', before, after)
@@ -255,17 +283,71 @@ export class Repo {
   slipImages(coupleId: number) {
     return this.all<Slip>('SELECT * FROM slips WHERE couple_id = ? AND image_path IS NOT NULL', coupleId)
   }
+  /** สลิปเก่าที่ถามแล้วไม่มีใครตอบภายในเวลา → ไม่นับ */
+  expireStaleSlips(coupleId: number, cutoffIso: string) {
+    this.run("UPDATE slips SET ignored = 1, status = 'done' WHERE couple_id = ? AND status = 'pending' AND rule = 'stale' AND created_at < ?", coupleId, cutoffIso)
+  }
+  ignoredSlips(coupleId: number, sinceIso: string) {
+    return this.all<Slip>('SELECT * FROM slips WHERE couple_id = ? AND ignored = 1 AND amount_satang IS NOT NULL AND created_at >= ? ORDER BY id DESC', coupleId, sinceIso)
+  }
+  /** รายการที่ยังนับอยู่ของสลิปนี้ (มีได้อย่างเดียว) */
+  recordOfSlip(slipId: number) {
+    const e = this.get<{ id: number }>("SELECT id FROM expenses WHERE slip_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1", slipId)
+    if (e) return { entity: 'expense' as const, row: this.expense(e.id)! }
+    const s = this.get<Settlement>("SELECT * FROM settlements WHERE slip_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1", slipId)
+    return s ? { entity: 'settlement' as const, row: s } : undefined
+  }
 
   // ---------- settlements ----------
-  createSettlement(s: { coupleId: number; from: number; to: number; amount: number; day: string; summaryId: number | null; slipId?: number | null; createdBy: number | null }) {
-    const id = this.run('INSERT INTO settlements (couple_id, from_member, to_member, amount_satang, day, summary_id, slip_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      s.coupleId, s.from, s.to, s.amount, s.day, s.summaryId, s.slipId ?? null, s.createdBy)
-    const row = this.get<Settlement>('SELECT * FROM settlements WHERE id = ?', id)!
+  createSettlement(s: {
+    coupleId: number; from: number; to: number; amount: number; day: string; summaryId: number | null; slipId?: number | null; createdBy: number | null
+    kind?: Settlement['kind']; createdAt?: string
+  }) {
+    const id = this.run(`INSERT INTO settlements (couple_id, from_member, to_member, amount_satang, day, summary_id, slip_id, created_by, kind, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%SZ','now')))`,
+      s.coupleId, s.from, s.to, s.amount, s.day, s.summaryId, s.slipId ?? null, s.createdBy, s.kind ?? 'transfer', s.createdAt ?? null)
+    if (s.slipId) this.run('UPDATE slips SET ignored = 0 WHERE id = ?', s.slipId)
+    const row = this.settlement(id)!
     this.audit(s.coupleId, 'settlement', id, s.createdBy, 'create', null, row)
     return row
   }
+  settlement(id: number) {
+    return this.get<Settlement>('SELECT * FROM settlements WHERE id = ?', id)
+  }
   unmatchedSettlements(coupleId: number, day: string) {
-    return this.all<Settlement>('SELECT * FROM settlements WHERE couple_id = ? AND day = ? AND summary_id IS NULL ORDER BY id', coupleId, day)
+    return this.all<Settlement>("SELECT * FROM settlements WHERE couple_id = ? AND day = ? AND summary_id IS NULL AND status = 'active' ORDER BY id", coupleId, day)
+  }
+  /** ทุกการโอนที่ยังนับของวันนั้น (ทั้งที่ผูกสรุปและไม่ผูก) — ใช้แสดงในแอป */
+  settlementsByDay(coupleId: number, day: string) {
+    return this.all<Settlement>("SELECT * FROM settlements WHERE couple_id = ? AND day = ? AND status = 'active' ORDER BY id", coupleId, day)
+  }
+
+  /**
+   * ลบการโอน (soft) แล้วคืนยอดให้เท่าก่อนบันทึก:
+   * ผูกสรุป → ย้อน paid/settled ของสรุปนั้น (ถ้ามีสรุปวันหลังกว่าแล้ว ยอดยกมาถูกแช่ไปแล้ว → ใส่ยอดปรับปรุงเข้าวันนี้ด้วย)
+   * ไม่ผูก แต่วันนั้นปิดยอดแล้ว → ยอดปรับปรุงเข้าวันนี้ แบบเดียวกับ expense
+   */
+  deleteSettlement(id: number, memberId: number | null, today: string): Settlement {
+    return this.tx(() => {
+      const before = this.settlement(id)
+      if (!before || before.status !== 'active') throw new Error('ไม่พบรายการ')
+      const ms = this.members(before.couple_id)
+      const signed = ms[1]?.id === before.from_member ? before.amount_satang : -before.amount_satang // ผลต่อ paid ของสรุป = −ผลต่อ N
+      this.run("UPDATE settlements SET status = 'deleted' WHERE id = ?", id)
+      if (before.slip_id) this.run('UPDATE slips SET ignored = 1 WHERE id = ?', before.slip_id)
+      let adjust = false
+      const s = before.summary_id ? this.summaryById(before.summary_id) : undefined
+      if (s) {
+        const paid = s.paid_satang - signed
+        const left = s.net_satang - paid
+        this.updateSummary(s.id, { paid_satang: paid, settled: s.net_satang === 0 || left === 0 || Math.sign(left) !== Math.sign(s.net_satang) ? 1 : 0 })
+        adjust = (this.latestSummary(before.couple_id)?.date ?? '') > s.date
+      } else adjust = this.isClosed(before.couple_id, before.day)
+      if (adjust) this.run('INSERT INTO adjustments (couple_id, day, delta_satang, reason) VALUES (?, ?, ?, ?)', before.couple_id, today, signed, 'ลบการโอนของวันที่ปิดยอดแล้ว')
+      const after = this.settlement(id)!
+      this.audit(before.couple_id, 'settlement', id, memberId, 'delete', before, after)
+      return after
+    })
   }
 
   // ---------- daily_summaries ----------
@@ -311,6 +393,9 @@ export class Repo {
 
   // ---------- audit_log ----------
   audit(coupleId: number | null, entity: string, entityId: number | null, memberId: number | null, action: string, before: unknown, after: unknown) {
+    // log การทำงานปกติ: เฉพาะ id / สตางค์ / member id — ห้ามชื่อ ข้อความ หรือข้อมูลสลิป
+    const amt = ((after ?? before) as { amount_satang?: unknown } | null)?.amount_satang
+    log.info(`${entity}_${action}`, { couple: coupleId, id: entityId, member: memberId, ...(typeof amt === 'number' ? { satang: amt } : {}) })
     this.run('INSERT INTO audit_log (couple_id, entity, entity_id, member_id, action, before_json, after_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
       coupleId, entity, entityId, memberId, action, before == null ? null : JSON.stringify(before), after == null ? null : JSON.stringify(after))
   }

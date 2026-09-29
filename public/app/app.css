@@ -89,3 +89,8 @@ input, select { font: inherit; width: 100%; min-height: 48px; border-radius: 12p
 [hidden] { display: none !important; }
 .field-error { color: var(--warn); font-size: 16px; margin: 6px 0 0; }
 input[aria-invalid="true"] { border-color: var(--warn); }
+
+.help { color: var(--muted); font-size: 14px; margin: 4px 0 0; }
+button.small { min-height: 40px; padding: 6px 12px; font-size: 16px; }
+.danger-zone { margin: 40px 0 24px; padding: 16px; border: 2px solid var(--warn); border-radius: var(--r); background: #FDE7E5; }
+.danger-zone h2 { color: var(--warn); margin-top: 0; }
