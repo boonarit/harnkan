@@ -1,0 +1,9 @@
+# template: คัดลอกไป ~/.cloudflared/harnkan.yml แล้วแทน <TUNNEL_ID> และ hostname
+# เปิดเฉพาะ path ที่ต้องใช้จากภายนอก ที่เหลือ 404 (server bind 127.0.0.1 เท่านั้น)
+tunnel: <TUNNEL_ID>
+credentials-file: __HOME__/.cloudflared/<TUNNEL_ID>.json
+ingress:
+  - hostname: harnkan.example.com
+    path: ^/(webhook|healthz|qr/.*|app/.*|api/.*|domain/.*)$
+    service: http://127.0.0.1:8787
+  - service: http_status:404

@@ -1,0 +1,14 @@
+{
+  "type": "transfer_slip",
+  "amount": 90,
+  "datetime": "2026-09-29T08:10:00+07:00",
+  "sender_name": "เอ (สมมติ)",
+  "receiver_name": "ร้านกาแฟสมมติ",
+  "merchant": "กาแฟ",
+  "items": [
+    "ลาเต้",
+    "อเมริกาโน่"
+  ],
+  "category": "อาหาร",
+  "confidence": 0.96
+}

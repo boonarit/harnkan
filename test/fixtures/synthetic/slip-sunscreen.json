@@ -1,0 +1,13 @@
+{
+  "type": "receipt",
+  "amount": 359,
+  "datetime": "2026-09-29T19:10:00+07:00",
+  "sender_name": null,
+  "receiver_name": null,
+  "merchant": "ครีมกันแดด",
+  "items": [
+    "ครีมกันแดด SPF50"
+  ],
+  "category": "ของใช้ส่วนตัว",
+  "confidence": 0.92
+}

@@ -1,0 +1,17 @@
+{
+  "//": "ใช้ให้ editor ตรวจ type เท่านั้น — รันจริงด้วย node --experimental-strip-types ไม่มีขั้น build",
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "strict": true,
+    "allowJs": true,
+    "checkJs": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "scripts", "test", "public/app"]
+}

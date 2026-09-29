@@ -1,0 +1,11 @@
+{
+  "type": "receipt",
+  "amount": 85,
+  "datetime": null,
+  "sender_name": null,
+  "receiver_name": null,
+  "merchant": "ร้านน้ำ",
+  "items": [],
+  "category": "อาหาร",
+  "confidence": 0.55
+}

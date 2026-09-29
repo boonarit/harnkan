@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- template: แทน __HOME__ และ __NODE__ ก่อนติดตั้ง (ดู docs/DEPLOY.md) -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.harnkan.backup</string>
+  <key>WorkingDirectory</key><string>__HOME__/services/harnkan</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>--experimental-strip-types</string>
+    <string>--experimental-sqlite</string>
+    <string>--no-warnings</string>
+    <string>src/jobs/backup.ts</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HARNKAN_ENV</key><string>__HOME__/.config/harnkan/.env</string>
+    <key>TZ</key><string>Asia/Bangkok</string>
+  </dict>
+  <key>StandardOutPath</key><string>__HOME__/data/harnkan/logs/backup.stdout.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/data/harnkan/logs/backup.stdout.log</string>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+</dict>
+</plist>

@@ -1,0 +1,11 @@
+{
+  "type": "transfer_slip",
+  "amount": 127,
+  "datetime": "2026-09-29T18:45:00+07:00",
+  "sender_name": "เอ (สมมติ)",
+  "receiver_name": "7-Eleven สาขาสมมติ",
+  "merchant": "7-Eleven",
+  "items": [],
+  "category": "ของใช้",
+  "confidence": 0.95
+}

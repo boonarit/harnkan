@@ -1,0 +1,22 @@
+.demo-bar { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.demo-bar button { min-height: 40px; padding: 4px 14px; }
+.demo-switch { display: flex; gap: 8px; margin: 12px 0; }
+.demo-switch button { flex: 1; background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+.demo-switch button[aria-selected="true"] { background: var(--dark); color: #fff; }
+.chat-head { background: var(--dark); color: #fff; border-radius: 14px; padding: 10px 14px; font-weight: 600; }
+.chat-log { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 10px; }
+.msg { max-width: 85%; padding: 10px 14px; border-radius: 18px; background: #fff; white-space: pre-line; }
+.msg.me { align-self: flex-end; background: #C9F0B5; }
+.msg .from { font-size: 14px; color: var(--muted); display: block; }
+.msg img { max-width: 160px; border-radius: 8px; display: block; }
+.card { border: 1px solid var(--line); white-space: normal; }
+.card .ok { color: var(--ok); font-weight: 600; }
+.card .t { font-family: 'Mitr', sans-serif; font-size: 20px; display: flex; justify-content: space-between; gap: 12px; }
+.card .quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.card .quick button { min-height: 44px; padding: 4px 12px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 22px; }
+.slips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.slips button { white-space: nowrap; flex: none; }
+.chat-input { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+.chat-input input { flex: 1; min-width: 160px; }
+.chat-input .chips { flex-basis: 100%; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

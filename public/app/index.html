@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>หารกัน</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai+Looped:wght@400;500;600&family=Mitr:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./app.css">
+  <script type="importmap">{ "imports": { "#domain/": "/domain/" } }</script>
+</head>
+<body>
+  <main id="app" aria-live="polite"><p class="loading">กำลังโหลด…</p></main>
+  <nav class="tabs" aria-label="เมนูหลัก">
+    <a href="#/" data-tab="today">วันนี้</a>
+    <a href="#/history" data-tab="history">ประวัติ</a>
+    <a href="#/settle" data-tab="settle">เคลียร์ยอด</a>
+    <a href="#/settings" data-tab="settings">ตั้งค่า</a>
+  </nav>
+  <script type="module" src="./boot.js"></script>
+</body>
+</html>

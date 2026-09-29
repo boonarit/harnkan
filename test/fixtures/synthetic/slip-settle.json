@@ -1,0 +1,11 @@
+{
+  "type": "transfer_slip",
+  "amount": 347.5,
+  "datetime": "2026-09-29T21:05:00+07:00",
+  "sender_name": "น.ส. บี ส.",
+  "receiver_name": "นาย เอ ส.",
+  "merchant": null,
+  "items": [],
+  "category": null,
+  "confidence": 0.97
+}
