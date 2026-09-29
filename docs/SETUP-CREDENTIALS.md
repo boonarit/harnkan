@@ -9,7 +9,7 @@
 - [ ] 1. LINE Official Account + Messaging API channel
 - [ ] 2. ตั้ง webhook
 - [ ] 3. LINE Login channel + LIFF app (mini app)
-- [ ] 4. Anthropic API key
+- [ ] 4. Gemini API key (AI Studio + billing + budget alert) — หรือ Anthropic ถ้าเลือก `AI_PROVIDER=claude`
 - [ ] 5. ไฟล์ `~/.config/harnkan/.env` ครบ แล้ว restart
 - [ ] 6. ทดสอบในกลุ่มจริง
 - [ ] 7. ตั้งเบอร์พร้อมเพย์ 2 คน และชื่อบัญชีตามสลิป
@@ -71,13 +71,38 @@ tail -n 20 ~/data/harnkan/logs/harnkan.log
 
 ทดสอบหลัง restart (ข้อ 5): เปิด `https://liff.line.me/<LIFF ID>` ในแชท LINE → ต้องเห็นหน้า "วันนี้" (ถ้าเห็น "ยังไม่ได้อยู่ในกลุ่มหารกัน" = ยังไม่ได้พิมพ์อะไรในกลุ่ม)
 
-## 4. Anthropic API key
+## 4. ตัวอ่านสลิป (AI)
+
+ค่าเริ่มต้นคือ **Gemini** (`AI_PROVIDER=gemini`) เหตุผลอยู่ใน `docs/decisions/006-gemini.md` · ใช้ Claude แทนได้ (ข้อ 4b)
+
+> ⚠️ **ห้ามใช้ free tier ของ Gemini API กับสลิปจริง** — ตามเงื่อนไขของ Gemini API (ณ ตอนเขียน) ข้อมูลที่ส่งผ่าน free tier อาจถูก Google นำไปปรับปรุงผลิตภัณฑ์และให้คนตรวจอ่านได้ สลิปมีชื่อ บัญชี และยอดเงินจริง ต้องใช้ key จากโปรเจกต์ที่ **เปิด billing (paid tier)** เท่านั้น · ตรวจเงื่อนไขล่าสุดของ Google อีกครั้งก่อนใช้งาน
+
+### 4a. Gemini (ค่าเริ่มต้น)
+
+1. เข้า [Google AI Studio](https://aistudio.google.com/) ด้วยบัญชี Google ของผู้ดูแล → **Get API key** → **Create API key** → เลือก/สร้าง Google Cloud project สำหรับหารกันโดยเฉพาะ (แยกจากโปรเจกต์อื่น)
+2. **เปิด billing ให้โปรเจกต์นั้น:** ในหน้า API keys ของ AI Studio กด **Set up billing** ที่โปรเจกต์ → ผูก Cloud Billing account → สถานะของ key ต้องเปลี่ยนจาก Free เป็น **Paid** (ถ้ายังเป็น Free ห้ามใช้กับสลิปจริง)
+3. **ตั้ง budget alert:** [Google Cloud Console](https://console.cloud.google.com/) → Billing → **Budgets & alerts** → Create budget → เลือกเฉพาะโปรเจกต์นี้ → ตั้งยอดรายเดือน (เริ่มต่ำๆ) → แจ้งเตือนที่ 50% / 90% / 100% ไปอีเมลผู้ดูแล
+   - budget alert **แค่แจ้งเตือน ไม่ได้หยุดการใช้จ่าย** · ตัวกันอีกชั้นคือ `AI_DAILY_CAP` ในแอป (ค่าเริ่ม 30 รูป/วัน/คู่ ปรับได้ในหน้าตั้งค่า)
+   - (ถ้าต้องการ) ตั้ง quota ต่อนาที/ต่อวันของ Generative Language API ใน Cloud Console → APIs & Services → Quotas
+4. คัดลอก key → ใส่ `GEMINI_API_KEY` ใน `~/.config/harnkan/.env` · ตั้ง `AI_PROVIDER=gemini`
+5. **เลือกรุ่น → `SLIP_MODEL`** (ไม่มีค่าเริ่มต้นในโค้ด เพราะชื่อรุ่นเปลี่ยนบ่อย): ดูรายชื่อรุ่นที่ key นี้ใช้ได้ด้วยคำสั่งด้านล่าง แล้วเลือกรุ่นตระกูล Flash ที่รองรับ `generateContent` · ใส่ชื่อ **ไม่ต้องมี** `models/` นำหน้า
+
+ทดสอบ key และดูรายชื่อรุ่น (key ส่งทาง header ไม่ใส่ใน URL):
+
+```sh
+set -a
+source ~/.config/harnkan/.env
+set +a
+curl -fsS https://generativelanguage.googleapis.com/v1beta/models -H "x-goog-api-key: $GEMINI_API_KEY" | grep '"name"'
+```
+
+ต้องได้รายการ `"name": "models/…"` · ถ้าได้ 400/403 = key ผิดหรือยังไม่เปิด Generative Language API ในโปรเจกต์
+
+### 4b. Claude (ทางเลือก)
 
 1. [console.anthropic.com](https://console.anthropic.com/) → API Keys → Create key → ใส่ `ANTHROPIC_API_KEY`
-2. ตั้ง **spend limit** รายเดือนของ workspace (แนะนำเริ่มต่ำๆ) · ในแอปยังมีเพดาน `AI_DAILY_CAP` (ค่าเริ่ม 30 รูป/วัน/คู่) อีกชั้น
-3. โมเดลเริ่มต้น `SLIP_MODEL=claude-haiku-4-5` (ถูกและเร็วพอสำหรับสลิป) · ถ้าเปลี่ยนเป็นรุ่นที่ไม่รองรับ forced tool use ต้องแก้ `src/slip/vision.ts` (ดู report B07)
-
-ทดสอบ key:
+2. ตั้ง **spend limit** รายเดือนของ workspace
+3. ตั้ง `AI_PROVIDER=claude` · `SLIP_MODEL` ว่างได้ (ใช้ `claude-haiku-4-5`) · ถ้าเปลี่ยนเป็นรุ่นที่ไม่รองรับ forced tool use ต้องแก้ `src/slip/vision.ts`
 
 ```sh
 set -a
@@ -86,11 +111,9 @@ set +a
 curl -fsS https://api.anthropic.com/v1/models -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01"
 ```
 
-ต้องได้รายชื่อโมเดล
-
 ## 5. ไฟล์ env และ restart
 
-ค่าที่ต้องมี (ดูรูปแบบใน `.env.example` และ `docs/DEPLOY.md` ข้อ 2): `FAKE_LINE=0` `FAKE_AI=0` `DATA_DIR` `BACKUP_DIR` `PUBLIC_BASE_URL` `LINE_CHANNEL_SECRET` `LINE_CHANNEL_ACCESS_TOKEN` `LIFF_CHANNEL_ID` `LIFF_ID` `ANTHROPIC_API_KEY`
+ค่าที่ต้องมี (ดูรูปแบบใน `.env.example` และ `docs/DEPLOY.md` ข้อ 2): `FAKE_LINE=0` `FAKE_AI=0` `DATA_DIR` `BACKUP_DIR` `PUBLIC_BASE_URL` `LINE_CHANNEL_SECRET` `LINE_CHANNEL_ACCESS_TOKEN` `LIFF_CHANNEL_ID` `LIFF_ID` `AI_PROVIDER` `SLIP_MODEL` และ `GEMINI_API_KEY` (หรือ `ANTHROPIC_API_KEY` ถ้าใช้ claude)
 
 ```sh
 chmod 600 ~/.config/harnkan/.env

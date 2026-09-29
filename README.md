@@ -51,7 +51,7 @@ flowchart LR
     DB[(SQLite<br/>node:sqlite)]
     F[[รูปสลิป / QR<br/>DATA_DIR]]
   end
-  AI[Claude API<br/>อ่านสลิป]
+  AI[Gemini API หรือ Claude API<br/>อ่านสลิป]
   G -- webhook --> CF --> S --> B --> DB
   L -- HTTPS --> CF --> S --> API --> DB
   B -- ถอด QR ในเครื่องก่อน<br/>แล้วค่อยส่งรูป --> AI
@@ -63,7 +63,7 @@ flowchart LR
 - `src/domain/` — เงิน การหาร ยอดสุทธิ parse ข้อความ (pure JS ใช้ร่วมกันทั้ง server, mini app และเดโม)
 - `src/db/` — schema + migrations + Repo (ทุกการแก้/ลบเขียน audit log)
 - `src/line/` — ตรวจลายเซ็น, client จริง/fake, router, Flex message
-- `src/slip/` — ถอด QR, อ่านด้วย AI (จริง/fake), จัดประเภท
+- `src/slip/` — ถอด QR, อ่านด้วย AI (Gemini ค่าเริ่ม / Claude / fake), จัดประเภท
 - `src/api/` — REST สำหรับ mini app · `public/app/` — mini app (HTML + ES modules ไม่มี build) · `demo/` — โหมดเดโม static
 
 ## สูตรหาร
@@ -122,7 +122,7 @@ npm run demo
 
 ## เอกสาร
 
-- การตัดสินใจ: [001 LINE-first](docs/decisions/001-line-first.md) · [002 SQLite](docs/decisions/002-sqlite.md) · [003 เงินเป็นสตางค์](docs/decisions/003-satang.md) · [004 ถอด QR ก่อน AI](docs/decisions/004-qr-before-ai.md) · [005 ไม่ใช้ Docker](docs/decisions/005-no-docker.md)
+- การตัดสินใจ: [001 LINE-first](docs/decisions/001-line-first.md) · [002 SQLite](docs/decisions/002-sqlite.md) · [003 เงินเป็นสตางค์](docs/decisions/003-satang.md) · [004 ถอด QR ก่อน AI](docs/decisions/004-qr-before-ai.md) · [005 ไม่ใช้ Docker](docs/decisions/005-no-docker.md) · [006 Gemini อ่านสลิป](docs/decisions/006-gemini.md)
 - [ติดตั้งบน Mac mini](docs/DEPLOY.md) · [ใส่ credential](docs/SETUP-CREDENTIALS.md) · [ความเป็นส่วนตัว](docs/PRIVACY.md) · [แผนงาน](docs/PLAN.md) · [CHANGELOG](docs/CHANGELOG.md)
 
 ## License

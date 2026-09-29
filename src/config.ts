@@ -16,6 +16,8 @@ export type Config = {
   lineChannelAccessToken: string
   liffChannelId: string
   liffId: string
+  aiProvider: 'gemini' | 'claude'
+  geminiApiKey: string
   anthropicApiKey: string
   slipModel: string
   aiDailyCap: number
@@ -46,6 +48,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   // ไม่มีไฟล์ env และไม่ได้ตั้งค่า → โหมด fake
   const fakeLine = bool(get('FAKE_LINE'), true)
   const fakeAi = bool(get('FAKE_AI'), true)
+  const aiProvider = (get('AI_PROVIDER') || 'gemini').toLowerCase()
+  if (aiProvider !== 'gemini' && aiProvider !== 'claude') throw new Error(`AI_PROVIDER ต้องเป็น gemini หรือ claude (ได้ "${aiProvider}")`)
   const dataDir = path(get('DATA_DIR') || './.data')
   const cfg: Config = {
     fakeLine,
@@ -61,8 +65,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     lineChannelAccessToken: get('LINE_CHANNEL_ACCESS_TOKEN') || '',
     liffChannelId: get('LIFF_CHANNEL_ID') || '',
     liffId: get('LIFF_ID') || '',
+    aiProvider,
+    geminiApiKey: get('GEMINI_API_KEY') || '',
     anthropicApiKey: get('ANTHROPIC_API_KEY') || '',
-    slipModel: get('SLIP_MODEL') || 'claude-haiku-4-5',
+    // gemini: ไม่มีค่าเริ่มต้น (ชื่อรุ่นเปลี่ยนบ่อย ต้องเลือกเองจาก AI Studio) · claude: ตาม B07
+    slipModel: get('SLIP_MODEL') || (aiProvider === 'claude' ? 'claude-haiku-4-5' : ''),
     aiDailyCap: int(get('AI_DAILY_CAP'), 30),
     minTransfer: int(get('MIN_TRANSFER'), 5000),
   }
@@ -71,7 +78,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (!fakeLine) {
     for (const k of ['LINE_CHANNEL_SECRET', 'LINE_CHANNEL_ACCESS_TOKEN', 'LIFF_CHANNEL_ID', 'PUBLIC_BASE_URL']) if (!get(k)) missing.push(k)
   }
-  if (!fakeAi && !get('ANTHROPIC_API_KEY')) missing.push('ANTHROPIC_API_KEY')
+  if (!fakeAi && aiProvider === 'claude' && !get('ANTHROPIC_API_KEY')) missing.push('ANTHROPIC_API_KEY')
+  if (!fakeAi && aiProvider === 'gemini') {
+    if (!get('GEMINI_API_KEY')) missing.push('GEMINI_API_KEY')
+    if (!get('SLIP_MODEL')) missing.push('SLIP_MODEL')
+  }
   if (missing.length) throw new Error(`ขาดค่า env: ${missing.join(', ')} (ดู docs/SETUP-CREDENTIALS.md)`)
   return cfg
 }

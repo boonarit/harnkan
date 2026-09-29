@@ -10,6 +10,8 @@ test('check จับความลับและข้อมูลส่ว�
     'secret: ' + 'abcdef0123456789abcdef0123456789',
     'โทร 081-234-5678',
     'บัญชี 123-4-56789-0',
+    'k=' + 'AI' + 'za' + 'SyA1234567890abcdefghijklmnopqrstuv',
+    'GEMINI_API' + '_KEY=abc123',
   ]
   for (const s of bad) assert.ok(scanText('x.ts', s).length > 0, s)
 })
@@ -37,6 +39,7 @@ test('config: ไม่มีไฟล์ env → โหมด fake', () => {
 
 test('config: โหมดจริงต้องมี credential', () => {
   assert.throws(() => loadConfig({ HARNKAN_ENV: '/nonexistent', FAKE_LINE: '0', FAKE_AI: '1' }), /LINE_CHANNEL_SECRET/)
-  assert.throws(() => loadConfig({ HARNKAN_ENV: '/nonexistent', FAKE_LINE: '1', FAKE_AI: '0' }), /ANTHROPIC_API_KEY/)
+  assert.throws(() => loadConfig({ HARNKAN_ENV: '/nonexistent', FAKE_LINE: '1', FAKE_AI: '0' }), /GEMINI_API_KEY/)
+  assert.throws(() => loadConfig({ HARNKAN_ENV: '/nonexistent', FAKE_LINE: '1', FAKE_AI: '0', AI_PROVIDER: 'claude' }), /ANTHROPIC_API_KEY/)
   assert.deepEqual(parseEnvFile('# c\nA=1\nB="x y"\n'), { A: '1', B: 'x y' })
 })

@@ -10,11 +10,12 @@ type Rule = { name: string; re: RegExp; allow?: (m: string) => boolean; only?: R
 const PK = '-----BEGIN ' + '[A-Z ]*PRIVATE KEY-----'
 const rules: Rule[] = [
   { name: 'Anthropic API key', re: new RegExp('sk-' + 'ant-[A-Za-z0-9_-]{20,}') },
+  { name: 'Google API key', re: new RegExp('AI' + 'za[0-9A-Za-z_-]{35}') },
   { name: 'private key', re: new RegExp(PK) },
   { name: 'LINE user/group ID จริง', re: /\b[UCR][0-9a-f]{32}\b/ },
   { name: 'secret 32 hex (channel secret)', re: /(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])/ },
   { name: 'token ยาว', re: /[A-Za-z0-9+/_=-]{120,}/ },
-  { name: 'ค่า secret ใน env', re: /^(LINE_CHANNEL_SECRET|LINE_CHANNEL_ACCESS_TOKEN|ANTHROPIC_API_KEY)=\S+/m },
+  { name: 'ค่า secret ใน env', re: /^(LINE_CHANNEL_SECRET|LINE_CHANNEL_ACCESS_TOKEN|ANTHROPIC_API_KEY|GEMINI_API_KEY)=\S+/m },
   {
     name: 'เบอร์โทร/พร้อมเพย์ไทย',
     re: /(?<![\w.])0[689]\d[- ]?\d{3}[- ]?\d{4}(?![\w])/g,

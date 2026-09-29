@@ -42,6 +42,14 @@ export const SLIP_TOOL = {
 }
 
 const MAX_SIDE = 1568
+const PROMPT = 'อ่านรูปนี้ (สลิปโอนเงินหรือใบเสร็จในไทย) แล้วบันทึกด้วย record_slip · ถ้าไม่ใช่สลิป/ใบเสร็จให้ type=other · อย่าเดายอดที่มองไม่เห็น'
+
+/** ย่อด้านยาวไม่เกิน 1568px → JPEG base64 (ใช้ร่วม Claude/Gemini) */
+async function toJpegBase64(image: Buffer) {
+  const img = await Jimp.read(image)
+  if (Math.max(img.width, img.height) > MAX_SIDE) img.scaleToFit({ w: MAX_SIDE, h: MAX_SIDE })
+  return (await img.getBuffer('image/jpeg', { quality: 85 })).toString('base64')
+}
 
 /** อ่านสลิปด้วย Claude (บังคับผลเป็น JSON ผ่าน tool) */
 export class ClaudeSlipReader implements SlipReader {
@@ -52,9 +60,7 @@ export class ClaudeSlipReader implements SlipReader {
     this.model = model
   }
   async read(image: Buffer): Promise<SlipAi> {
-    const img = await Jimp.read(image)
-    if (Math.max(img.width, img.height) > MAX_SIDE) img.scaleToFit({ w: MAX_SIDE, h: MAX_SIDE })
-    const data = (await img.getBuffer('image/jpeg', { quality: 85 })).toString('base64')
+    const data = await toJpegBase64(image)
     const res = await this.client.messages.create({
       model: this.model,
       max_tokens: 1024,
@@ -64,13 +70,80 @@ export class ClaudeSlipReader implements SlipReader {
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } },
-          { type: 'text', text: 'อ่านรูปนี้ (สลิปโอนเงินหรือใบเสร็จในไทย) แล้วบันทึกด้วย record_slip · ถ้าไม่ใช่สลิป/ใบเสร็จให้ type=other · อย่าเดายอดที่มองไม่เห็น' },
+          { type: 'text', text: PROMPT },
         ],
       }],
     })
     const block = res.content.find((b) => b.type === 'tool_use')
     if (!block || block.type !== 'tool_use') throw new Error(`AI ไม่ตอบผ่าน tool (stop_reason=${res.stop_reason})`)
     return normalize(block.input as Partial<SlipAi>)
+  }
+}
+
+type JsonSchema = { type?: string | string[]; properties?: Record<string, JsonSchema>; items?: JsonSchema; required?: string[]; enum?: string[]; description?: string }
+
+/** JSON Schema ของ SLIP_TOOL → responseSchema ของ Gemini (OpenAPI subset: TYPE ตัวใหญ่, nullable) · สร้างจากแหล่งเดียวกัน field จึงตรงกันเสมอ */
+export function geminiSchema(s: JsonSchema): Record<string, unknown> {
+  const types = Array.isArray(s.type) ? s.type : s.type ? [s.type] : []
+  const main = types.find((t) => t !== 'null')
+  const out: Record<string, unknown> = {}
+  if (main) out.type = main.toUpperCase()
+  if (types.includes('null')) out.nullable = true
+  if (s.enum) out.enum = s.enum
+  if (s.properties) out.properties = Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, geminiSchema(v)]))
+  if (s.items) out.items = geminiSchema(s.items)
+  if (s.required) out.required = s.required
+  if (s.description) out.description = s.description
+  return out
+}
+
+const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models'
+
+/** อ่านสลิปด้วย Gemini ผ่าน REST (fetch ตรง ไม่มี SDK) · key ส่งทาง header x-goog-api-key เท่านั้น ไม่อยู่ใน URL */
+export class GeminiSlipReader implements SlipReader {
+  apiKey: string
+  model: string
+  fetch: typeof fetch
+  constructor(apiKey: string, model: string, fetchFn: typeof fetch = globalThis.fetch) {
+    if (!model) throw new Error('ต้องตั้ง SLIP_MODEL สำหรับ Gemini')
+    this.apiKey = apiKey
+    this.model = model
+    this.fetch = fetchFn
+  }
+  /** กัน key หลุดไปกับข้อความ error (บาง error ของ API สะท้อน request กลับมา) */
+  private scrub(s: string) {
+    return this.apiKey ? s.split(this.apiKey).join('[redacted]') : s
+  }
+  async read(image: Buffer): Promise<SlipAi> {
+    const data = await toJpegBase64(image)
+    const res = await this.fetch(`${GEMINI_API}/${encodeURIComponent(this.model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'image/jpeg', data } }, { text: PROMPT.replace('ด้วย record_slip', 'เป็น JSON ตาม schema') }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: geminiSchema(SLIP_TOOL.input_schema), temperature: 0 },
+      }),
+      signal: AbortSignal.timeout(60_000),
+    })
+    const raw = await res.text()
+    if (!res.ok) throw new Error(this.scrub(`Gemini HTTP ${res.status}: ${raw.slice(0, 200)}`))
+    let j: { candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[]; promptFeedback?: { blockReason?: string } }
+    try {
+      j = JSON.parse(raw)
+    } catch {
+      throw new Error('Gemini ตอบไม่ใช่ JSON')
+    }
+    if (j.promptFeedback?.blockReason) throw new Error(`Gemini บล็อกรูป: ${j.promptFeedback.blockReason}`)
+    const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('')
+    if (!text) throw new Error(`Gemini ไม่มีคำตอบ (finishReason=${j.candidates?.[0]?.finishReason ?? '-'})`)
+    let out: unknown
+    try {
+      out = JSON.parse(text)
+    } catch {
+      throw new Error('Gemini ตอบ JSON เพี้ยน')
+    }
+    if (!out || typeof out !== 'object' || Array.isArray(out)) throw new Error('Gemini ตอบผิดรูปแบบ')
+    return normalize(out as Partial<SlipAi>)
   }
 }
 
