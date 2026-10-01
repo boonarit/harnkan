@@ -164,7 +164,7 @@ report เต็มอยู่ใน vault `claude_ai/projects/harnkan/reports/
 | B16 | ✅ เสร็จ | `6ffb749` |
 | B17 | ✅ เสร็จ | `1b5bada` |
 | B18 | ✅ เสร็จ | `305c630` |
-| B19 | ✅ เสร็จ | `6ae783e` |
+| B19 | ✅ เสร็จ | `6ae783e` `85e8e2c` |
 
 ครบ B01–B14 ในโหมด fake · เทสต์ 98 ตัวเขียวบน Node 26 (M1) และ Node 22 · `npm run check` ผ่าน · ไม่มีเรื่องติดที่ต้องจด QUESTIONS.md
 
