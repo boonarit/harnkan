@@ -27,7 +27,7 @@ test('format: ประโยคยอด โหมดหาร พรีวิ�
   assert.equal(netSentence(0, members), 'ไม่มีใครติดใคร')
   assert.equal(chipToMode('1', 0), 'theirs')
   assert.equal(chipToMode('1', 1), 'mine')
-  for (const payer of [0, 1] as const) for (const chip of ['half', '0', '1', 'treat'] as const) assert.equal(modeToChip(chipToMode(chip, payer), payer), chip)
+  for (const payer of [0, 1] as const) for (const chip of ['half', '0', '1', 't0', 't1'] as const) assert.equal(modeToChip(chipToMode(chip, payer), payer, chip[0] === 't' ? Number(chip[1]) : -1), chip)
   assert.equal(modeLabel({ split_mode: 'theirs', payer: 0 }, members), 'ของบี')
   assert.deepEqual(preview({ amount: 9000, payer: 0, mode: 'half', net: 0 }), { shares: [4500, 4500], effect: 4500, net: 4500 })
   assert.equal(preview({ amount: 35900, payer: 0, mode: 'theirs', net: 4500 }).net, 40400)

@@ -1,7 +1,8 @@
 import type { Expense, Member } from '../db/repo.ts'
 import type { Message } from './client.ts'
 import { formatBaht } from '../domain/money.js'
-import { effect } from '../domain/split.js'
+import { clip } from '../domain/name.js'
+import { effect, modeLabel } from '../domain/split.js'
 
 /** ลิงก์เปิด mini app ผ่าน LIFF (path เป็น hash route เช่น "/settings") · ไม่มี LIFF_ID = null → ไม่แสดงปุ่ม */
 export function appUrl(liffId: string, path = '/'): string | null {
@@ -9,17 +10,7 @@ export function appUrl(liffId: string, path = '/'): string | null {
 }
 export const appButton = (uri: string, label = 'ดู/แก้ในแอป') => ({ type: 'button', style: 'link', height: 'sm', action: { type: 'uri', label, uri } })
 
-export function modeLabel(e: Pick<Expense, 'split_mode' | 'ratio' | 'payer'>, members: Member[]) {
-  const payer = members[e.payer]?.display_name ?? '?'
-  const other = members[1 - e.payer]?.display_name ?? '?'
-  switch (e.split_mode) {
-    case 'half': return 'หารครึ่ง'
-    case 'mine': return `ของ${payer}`
-    case 'theirs': return `ของ${other}`
-    case 'treat': return `${payer}เลี้ยง`
-    case 'ratio': return `${payer} ${e.ratio}% / ${other} ${100 - (e.ratio ?? 50)}%`
-  }
-}
+export { modeLabel }
 
 /** ยอดสุทธิ → ประโยค "บี โอนให้ เอ ฿347.50" */
 export function netText(net: number, members: Member[]) {
@@ -36,19 +27,27 @@ const row = (label: string, value: string, bold = false) => ({
   ],
 })
 
-/** quick reply 4 ปุ่ม: หารครึ่ง · ของ<A> · ของ<B> · เลี้ยง */
+export const QUICK_LABEL_MAX = 20 // ขีดจำกัด label ของ LINE quick reply
+/** ป้ายปุ่ม = ข้อความนำ + ชื่อ + ข้อความท้าย ไม่เกิน 20 ตัว · ชื่อยาวถูกตัดตาม code point (ไม่ผ่ากลางอีโมจิ) ข้อความท้ายยังอยู่ */
+export function quickLabel(pre: string, name: string, post = '') {
+  return pre + clip(name, QUICK_LABEL_MAX - [...pre].length - [...post].length, '…') + post
+}
+
+/**
+ * quick reply 5 ปุ่ม: หารครึ่ง · ของ<A> · ของ<B> · <A>เลี้ยง · <B>เลี้ยง
+ * ปุ่มเลี้ยงอ้าง member id (ไม่ใช่ชื่อ) → การ์ดเก่ายังกดได้ถูกคนแม้เปลี่ยนชื่อแล้ว
+ */
 export function splitQuickReply(e: Pick<Expense, 'id' | 'payer'>, members: Member[]) {
   const forSlot = (slot: number) => (slot === e.payer ? 'mine' : 'theirs')
-  const items: [string, string][] = [
-    ['หารครึ่ง', 'half'],
-    [`ของ${members[0].display_name}`, forSlot(0)],
-    [`ของ${members[1].display_name}`, forSlot(1)],
-    ['เลี้ยง', 'treat'],
+  const items: [string, string, string][] = [
+    ['หารครึ่ง', 'หารครึ่ง', 'half'],
+    ...members.map((m, i): [string, string, string] => [quickLabel('ของ', m.display_name), `ของ${m.display_name}`, forSlot(i)]),
+    ...members.map((m): [string, string, string] => [quickLabel('', m.display_name, 'เลี้ยง'), `${m.display_name}เลี้ยง`, `treat:${m.id}`]),
   ]
   return {
-    items: items.map(([label, mode]) => ({
+    items: items.map(([label, full, mode]) => ({
       type: 'action',
-      action: { type: 'postback', label: label.slice(0, 20), data: `split:${e.id}:${mode}`, displayText: label },
+      action: { type: 'postback', label, data: `split:${e.id}:${mode}`, displayText: full },
     })),
   }
 }
@@ -89,24 +88,24 @@ export function thaiDate(date: string) {
   return `${d} ${TH_MONTHS[m - 1]}`
 }
 
-/** การ์ดสรุป 21:00: ยอดเดียว · ใครโอนให้ใคร · จำนวนบิล · QR · ปุ่มทบไปพรุ่งนี้ */
+/** การ์ดสรุปตามเวลาสรุปของคู่: ยอดเดียว · ใครโอนให้ใคร · จำนวนบิล · QR · ปุ่มทบไปพรุ่งนี้ · title บอกวันที่เสมอ (summaryTitle) */
 export function summaryCard(opts: {
-  summaryId: number; date: string; amount: number; from: Member; to: Member; bills: number; carriedIn: number; qrUrl: string | null
+  summaryId: number; title: string; amount: number; from: Member; to: Member; bills: number; carriedIn: number; qrUrl: string | null
   appLink?: string | null
 }): Message {
   const { from, to } = opts
   const body: Record<string, unknown>[] = [
-    { type: 'text', text: `สรุปยอด ${thaiDate(opts.date)}`, size: 'sm', color: '#B8B0A3' },
+    { type: 'text', text: opts.title, size: 'sm', color: '#B8B0A3' },
     { type: 'text', text: formatBaht(opts.amount), size: '3xl', weight: 'bold', color: '#FFFFFF' },
     { type: 'text', text: `${from.display_name} โอนให้ ${to.display_name}`, size: 'md', color: '#FFFFFF', weight: 'bold' },
-    { type: 'text', text: `จาก ${opts.bills} รายการวันนี้${opts.carriedIn ? ` · ยอดยกมา ${formatBaht(opts.carriedIn)}` : ''}`, size: 'sm', color: '#B8B0A3', wrap: true },
+    { type: 'text', text: `จาก ${opts.bills} รายการ${opts.carriedIn ? ` · ยอดยกมา ${formatBaht(opts.carriedIn)}` : ''}`, size: 'sm', color: '#B8B0A3', wrap: true },
   ]
   const account = !opts.qrUrl && to.bank_account ? to.bank_account : null
   if (account) body.push({ type: 'text', text: `โอนเข้า ${to.bank_name ?? 'บัญชี'} ${account}`, size: 'md', color: '#FFFFFF', wrap: true })
   else if (!opts.qrUrl) body.push({ type: 'text', text: `${to.display_name} ยังไม่ได้ตั้งเบอร์พร้อมเพย์หรือเลขบัญชีในแอป`, size: 'xs', color: '#F2B28C', wrap: true })
   return {
     type: 'flex',
-    altText: `สรุปยอด ${thaiDate(opts.date)}: ${from.display_name} โอนให้ ${to.display_name} ${formatBaht(opts.amount)}`,
+    altText: `${opts.title}: ${from.display_name} โอนให้ ${to.display_name} ${formatBaht(opts.amount)}`,
     contents: {
       type: 'bubble',
       body: { type: 'box', layout: 'vertical', spacing: 'sm', backgroundColor: '#24211D', contents: body },

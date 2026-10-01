@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -22,7 +22,7 @@ test('launchd plist: label ตรงชื่อไฟล์ · ค่าเป�
     assert.ok(!/\/Users\/|\/home\//.test(x), `${f} มี path จริง`)
     assert.equal((x.match(/<dict>/g) ?? []).length, (x.match(/<\/dict>/g) ?? []).length)
   }
-  assert.match(read('deploy/com.harnkan.summary.plist'), /<key>Hour<\/key><integer>21<\/integer><key>Minute<\/key><integer>0<\/integer>/)
+  assert.match(read('deploy/com.harnkan.summary.plist'), /<key>StartInterval<\/key><integer>600<\/integer>/)
   assert.match(read('deploy/com.harnkan.backup.plist'), /<key>Hour<\/key><integer>4<\/integer>/)
   assert.match(read('deploy/com.harnkan.retention.plist'), /<key>Weekday<\/key>/)
   assert.match(read('deploy/com.harnkan.bot.plist'), /<key>KeepAlive<\/key><true\/>/)
@@ -71,13 +71,14 @@ test('config: ~ ใน DATA_DIR / BACKUP_DIR ขยายเป็น home (laun
 })
 
 /** sandbox: HOME ปลอม + origin เป็น git จริง + stub npm/launchctl/curl/sleep ที่จดทุกคำสั่งลง calls.log */
-function updateSandbox(opts: { backupFails?: boolean } = {}) {
+function updateSandbox(opts: { backupFails?: boolean; installed?: string } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'harnkan-upd-'))
   const g = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.name=fake', '-c', 'user.email=fake@example.com', ...a], { cwd, stdio: 'pipe' }).toString().trim()
   const work = join(home, 'work')
   mkdirSync(join(work, 'deploy'), { recursive: true })
   const v1 = read('deploy/update.sh')
   writeFileSync(join(work, 'deploy/update.sh'), v1)
+  writeFileSync(join(work, 'deploy/com.harnkan.summary.plist'), read('deploy/com.harnkan.summary.plist'))
   g(work, 'init', '-q', '-b', 'main')
   g(work, 'add', '.')
   g(work, 'commit', '-qm', 'v1')
@@ -93,17 +94,23 @@ function updateSandbox(opts: { backupFails?: boolean } = {}) {
   g(work, 'push', '-q', join(home, 'origin.git'), 'main')
   const c2 = g(work, 'rev-parse', 'HEAD')
   mkdirSync(join(home, 'data/harnkan'), { recursive: true })
+  mkdirSync(join(home, 'Library/LaunchAgents'), { recursive: true })
+  if (opts.installed) writeFileSync(join(home, 'Library/LaunchAgents/com.harnkan.summary.plist'), opts.installed)
   const bin = join(home, 'bin')
   mkdirSync(bin)
-  for (const c of ['npm', 'launchctl', 'curl', 'sleep']) {
+  for (const c of ['npm', 'launchctl', 'curl', 'sleep', 'plutil']) {
     const fail = c === 'npm' && opts.backupFails ? 'case "$*" in *job:backup*) exit 1;; esac\n' : ''
     writeFileSync(join(bin, c), `#!/bin/bash\necho "${c} $*" >> "$HOME/calls.log"\n${fail}`)
     chmodSync(join(bin, c), 0o755)
   }
-  const r = spawnSync('bash', [join(home, 'services/harnkan/deploy/update.sh')], { env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, HARNKAN_UPDATE_REEXEC: '' }, encoding: 'utf8', timeout: 30_000, killSignal: 'SIGKILL' })
-  let calls: string[] = []
-  try { calls = readFileSync(join(home, 'calls.log'), 'utf8').trim().split('\n') } catch { /* ไม่มีคำสั่งไหนถูกเรียก */ }
-  return { r, calls, c1, c2, head: g(join(home, 'services/harnkan'), 'rev-parse', 'HEAD'), home }
+  const run = () => {
+    rmSync(join(home, 'calls.log'), { force: true })
+    const r = spawnSync('bash', [join(home, 'services/harnkan/deploy/update.sh')], { env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, HARNKAN_UPDATE_REEXEC: '' }, encoding: 'utf8', timeout: 30_000, killSignal: 'SIGKILL' })
+    let calls: string[] = []
+    try { calls = readFileSync(join(home, 'calls.log'), 'utf8').trim().split('\n') } catch { /* ไม่มีคำสั่งไหนถูกเรียก */ }
+    return { r, calls }
+  }
+  return { ...run(), run, c1, c2, head: g(join(home, 'services/harnkan'), 'rev-parse', 'HEAD'), home }
 }
 
 test('update.sh (B18): สำรองก่อน git pull · exec รุ่นใหม่ครั้งเดียว ขั้นที่เพิ่มในรุ่นใหม่ถูกรันในรอบเดียวกัน · สำรองก่อน migrate เสมอ', () => {
@@ -149,4 +156,26 @@ test('cloudflared (B18-9): plist tunnel ใช้ config แยก + UUID · tem
   assert.ok(!shDocs.some((l) => /(^|[\s;])HOST=|\$HOST\b|\$\{HOST\}/.test(l)), 'zsh: ใช้ HK_HOST')
   assert.match(docs, /LINE บน Mac เปิดแอปใน Chrome/)
   assert.match(docs, /mini app ในมือถือยังเป็นหน้าเก่า/)
+})
+
+test('update.sh (B19): ติดตั้ง plist งานสรุปรุ่นใหม่ (bootout ตัวเก่า → bootstrap ตัวใหม่) ไม่แตะงานอื่น · รอบถัดไปไม่มีอะไรเปลี่ยน = ไม่ bootout', () => {
+  const old = read('deploy/com.harnkan.summary.plist').replace(/<key>StartInterval<\/key><integer>\d+<\/integer>/, '<key>StartCalendarInterval</key><dict><key>Hour</key><integer>21</integer></dict>')
+  const { r, calls, home, run } = updateSandbox({ installed: old })
+  assert.equal(r.status, 0, r.stderr)
+  const la = join(home, 'Library/LaunchAgents/com.harnkan.summary.plist')
+  const installed = readFileSync(la, 'utf8')
+  assert.match(installed, /<key>StartInterval<\/key><integer>600<\/integer>/)
+  assert.ok(!/__HOME__|__NODE__/.test(installed), 'ต้องแทน placeholder')
+  assert.ok(installed.includes(`${home}/services/harnkan`))
+  assert.deepEqual(readdirSync(join(home, 'Library/LaunchAgents')), ['com.harnkan.summary.plist'], 'ไม่เขียน plist อื่น ไม่ทิ้ง .new')
+  const lc = calls.filter((c) => c.startsWith('launchctl'))
+  const at = (s: string) => lc.findIndex((c) => c.includes(s))
+  assert.ok(at('bootout') >= 0 && at('bootout') < at('bootstrap'), lc.join(' | '))
+  for (const c of lc) assert.ok(c.includes('com.harnkan.summary') || c === `launchctl kickstart -k gui/${process.getuid!()}/com.harnkan.bot`, `แตะงานอื่น: ${c}`)
+  assert.ok(calls.findIndex((c) => c.includes('migrate')) < calls.findIndex((c) => c.includes('bootout')))
+  // รอบถัดไป: plist เหมือนเดิม → ไม่ bootout/bootstrap
+  const again = run()
+  assert.equal(again.r.status, 0, again.r.stderr)
+  assert.ok(!again.calls.some((c) => /bootout|bootstrap/.test(c)), again.calls.join(' | '))
+  assert.match(again.r.stdout, /plist งานสรุปเป็นรุ่นล่าสุดแล้ว/)
 })

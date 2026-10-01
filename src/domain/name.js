@@ -4,6 +4,15 @@ import { PARSER_WORDS } from './parse.js'
 
 export const NAME_MAX = 40
 
+/**
+ * ตัดข้อความตาม code point (slice ของ string ผ่ากลางอีโมจิได้) · tail = ต่อท้ายเมื่อถูกตัด (นับรวมใน n)
+ * @param {string} s @param {number} n @param {string} [tail]
+ */
+export function clip(s, n, tail = '') {
+  const cp = [...s]
+  return cp.length <= n ? s : cp.slice(0, Math.max(0, n - [...tail].length)).join('') + tail
+}
+
 /** @param {unknown} s */
 export function normalizeName(s) {
   return String(s ?? '').replace(/\s+/g, ' ').trim()

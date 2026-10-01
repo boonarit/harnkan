@@ -3,9 +3,8 @@ import type { Couple, Member } from './db/repo.ts'
 import { formatBaht } from './domain/money.js'
 import { validateName } from './domain/name.js'
 import { parseMessage } from './domain/parse.js'
-import { MODES } from './domain/split.js'
+import { MODES, treatSplit } from './domain/split.js'
 import type { SplitMode } from './domain/split.js'
-import { businessDay } from './domain/time.js'
 import { appButton, appUrl, expenseCard, netText } from './line/flex.ts'
 import type { Handlers, LineEvent } from './line/router.ts'
 import { onAwaitingAmount, onImage, onSlipPostback } from './slip/flow.ts'
@@ -19,20 +18,21 @@ type Who = { couple: Couple; member: Member; members: Member[] }
 export const HELP = [
   'วิธีใช้หารกัน 🧾',
   '• พิมพ์ "กาแฟ 90" → หารครึ่ง',
-  '• "ข้าวเย็น 420 เลี้ยง" → เลี้ยง ไม่นับเข้ายอด',
+  '• "ข้าวเย็น 420 เลี้ยง" → คนจ่ายเลี้ยง ไม่นับเข้ายอด',
+  '• "ราดหน้า 120 บีเลี้ยง" → บีเลี้ยง (บีรับทั้งก้อนแม้คนอื่นจ่าย)',
   '• "ครีมกันแดดของบี 359" → ของอีกคนทั้งหมด',
   '• ส่งรูปสลิป/ใบเสร็จ → อ่านยอดให้',
   '• "สรุป" ดูยอดตอนนี้ · "ยกเลิก" ลบรายการล่าสุดของคุณ (รวมการโอน)',
   '• "ตั้งค่า" ดูเช็กลิสต์ตั้งค่า · "แอป" เปิดแอป',
   '• "ตั้งชื่อ ส้ม" เปลี่ยนชื่อที่บอทใช้เรียกคุณ',
-  '• 21:00 สรุปยอดโอนเดียว + QR พร้อมเพย์',
+  '• ทุกวันตามเวลาสรุป (ค่าเริ่ม 21:00 แก้ในแอป) สรุปยอดโอนเดียว + QR พร้อมเพย์',
 ].join('\n')
 
 export async function replyText(ctx: Ctx, ev: LineEvent, text: string, extra: Record<string, unknown> = {}) {
   if (ev.replyToken) await ctx.line.reply(ev.replyToken, [{ type: 'text', text, ...extra }])
 }
 
-export const today = (ctx: Ctx, couple: Couple) => businessDay(ctx.now(), couple.settle_time)
+export const today = (ctx: Ctx, couple: Couple) => ctx.repo.dayOf(couple, ctx.now())
 
 export function nowIso(ctx: Ctx) {
   return new Date(ctx.now()).toISOString()
@@ -102,10 +102,11 @@ async function onText(ctx: Ctx, ev: LineEvent, who: Who) {
   }
 
   if (await needPartner(ctx, ev, who)) return
-  const mode = intent.mode ?? modeFor(intent.forName, who.member, who.members, who.couple.default_split)
+  const treater = intent.treatName ? who.members.find((m) => m.display_name === intent.treatName) : undefined
+  const { mode, treatedBy } = treater ? treatSplit(treater.id, who.member.id) : { mode: intent.mode ?? modeFor(intent.forName, who.member, who.members, who.couple.default_split), treatedBy: null }
   const e = repo.createExpense({
     coupleId: who.couple.id, paidBy: who.member.id, amount: intent.amount, merchant: intent.merchant.slice(0, 60),
-    occurredAt: nowIso(ctx), day, mode, source: 'text', createdBy: who.member.id, createdAt: nowIso(ctx),
+    occurredAt: nowIso(ctx), day, mode, treatedBy, source: 'text', createdBy: who.member.id, createdAt: nowIso(ctx),
   })
   if (ev.replyToken) await ctx.line.reply(ev.replyToken, [expenseCard(e, who.members, repo.ledger(who.couple.id, day).net, undefined, appUrl(ctx.cfg.liffId, `/e/${e.id}`)), ...dupNote(ctx, who.couple, e), ...nudge(ctx, who.couple, who.members, day)])
 }
@@ -120,12 +121,17 @@ async function onPostback(ctx: Ctx, ev: LineEvent, who: Who) {
     const text = carrySummary(ctx, who.couple, Number(carry[1]), who.member.id)
     return text ? replyText(ctx, ev, text) : undefined
   }
-  const m = data.match(/^split:(\d+):(\w+)$/)
-  if (!m || !MODES.includes(m[2] as SplitMode)) return
+  // split:<id>:<mode> · split:<id>:treat:<member id> = "<X>เลี้ยง" (การ์ดก่อน B19 ส่ง split:<id>:treat = คนจ่ายเลี้ยง)
+  const m = data.match(/^split:(\d+):(\w+?)(?::(\d+))?$/)
+  if (!m || !MODES.includes(m[2] as SplitMode) || (m[3] && m[2] !== 'treat')) return
   const e = ctx.repo.expense(Number(m[1]))
   if (!e || e.couple_id !== who.couple.id || e.status !== 'active') return replyText(ctx, ev, 'ไม่พบรายการนี้แล้ว')
+  const treater = m[3] ? who.members.find((x) => x.id === Number(m[3])) : undefined
+  if (m[3] && !treater) return
+  const want = treater ? treatSplit(treater.id, e.paid_by) : { mode: m[2] as SplitMode, treatedBy: null }
   const day = today(ctx, who.couple)
-  const updated = e.split_mode === m[2] ? e : ctx.repo.updateExpense(e.id, { mode: m[2] as SplitMode }, who.member.id, day)
+  const same = e.split_mode === want.mode && (want.mode !== 'theirs' || e.treated_by === want.treatedBy)
+  const updated = same ? e : ctx.repo.updateExpense(e.id, want, who.member.id, day)
   if (ev.replyToken) await ctx.line.reply(ev.replyToken, [expenseCard(updated, who.members, ctx.repo.ledger(who.couple.id, day).net, '✓ เปลี่ยนการหารแล้ว', appUrl(ctx.cfg.liffId, `/e/${updated.id}`))])
 }
 

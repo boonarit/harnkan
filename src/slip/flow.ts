@@ -4,7 +4,7 @@ import type { Ctx } from '../app.ts'
 import type { Couple, Expense, Member, Slip } from '../db/repo.ts'
 import { formatBaht } from '../domain/money.js'
 import type { SplitMode } from '../domain/split.js'
-import { bangkokDate, bangkokTime, businessDay } from '../domain/time.js'
+import { bangkokDate, bangkokTime } from '../domain/time.js'
 import type { Message } from '../line/client.ts'
 import { appUrl, expenseCard, netText } from '../line/flex.ts'
 import type { LineEvent } from '../line/router.ts'
@@ -146,7 +146,7 @@ function settlementReply(ctx: Ctx, who: Who, slipId: number, text: string): Mess
 function createSlipExpense(ctx: Ctx, who: Who, slip: Slip, paidBy: number, amount: number, merchant: string, category: string | null, mode: SplitMode, actor: number) {
   const now = new Date(ctx.now()).toISOString()
   const e = ctx.repo.createExpense({
-    coupleId: who.couple.id, paidBy, amount, merchant: merchant.slice(0, 60), category, occurredAt: now, day: businessDay(ctx.now(), who.couple.settle_time),
+    coupleId: who.couple.id, paidBy, amount, merchant: merchant.slice(0, 60), category, occurredAt: now, day: ctx.repo.dayOf(who.couple, ctx.now()),
     mode, source: 'slip', slipId: slip.id, createdBy: actor, createdAt: now,
   })
   ctx.repo.updateSlip(slip.id, { kind: 'expense' })
@@ -184,7 +184,7 @@ export type FixOp = 'today' | 'ignore' | 'count' | 'notsettle' | 'settle' | 'hal
  */
 export function fixSlip(ctx: Ctx, who: Who, slip: Slip, op: FixOp, actor: number): Message[] {
   const { repo } = ctx
-  const day = businessDay(ctx.now(), who.couple.settle_time)
+  const day = ctx.repo.dayOf(who.couple, ctx.now())
   const members = repo.members(who.couple.id)
   const poster = repo.member(slip.member_id)!
   const text = (t: string, items: unknown[] = []) => [{ type: 'text', text: t, ...(items.length ? { quickReply: { items } } : {}) }]
@@ -234,7 +234,7 @@ export function fixSlip(ctx: Ctx, who: Who, slip: Slip, op: FixOp, actor: number
   const mode: SplitMode = op === 'count' ? who.couple.default_split : op
   if (rec?.entity === 'expense') {
     if (op === 'count') return text('สลิปนี้นับอยู่แล้ว')
-    const e = rec.row.split_mode === mode ? rec.row : repo.updateExpense(rec.row.id, { mode }, actor, day)
+    const e = rec.row.split_mode === mode && !(mode === 'theirs' && rec.row.treated_by) ? rec.row : repo.updateExpense(rec.row.id, { mode }, actor, day)
     return slipExpenseReply(ctx, who, e, slip.rule, '✓ เปลี่ยนการหารแล้ว')
   }
   let paidBy = poster.id

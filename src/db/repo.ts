@@ -1,12 +1,13 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
 import { dailyNet } from '../domain/balance.js'
-import { effect, splitShares } from '../domain/split.js'
+import { effect, splitShares, treaterOf } from '../domain/split.js'
+import { addDays, businessDay } from '../domain/time.js'
 import type { SplitMode } from '../domain/split.js'
 import { log } from '../log.ts'
 
 export type Slot = 0 | 1
 export type Couple = {
-  id: number; line_group_id: string; settle_time: string; min_transfer: number; default_split: SplitMode
+  id: number; line_group_id: string; settle_time: string; min_transfer: number; default_split: SplitMode; created_at: string
   ai_daily_cap: number | null; slip_retention_days: number | null; stale_slip_hours: number | null; pending_answer_hours: number | null
   onboard_nudged_on: string | null; dup_window_minutes: number | null
 }
@@ -20,6 +21,7 @@ export type Expense = {
   id: number; couple_id: number; paid_by: number; amount_satang: number; merchant: string; category: string | null
   occurred_at: string; day: string; split_mode: SplitMode; ratio: number | null; source: 'text' | 'slip' | 'manual'
   slip_id: number | null; status: 'active' | 'deleted'; created_by: number | null; created_at: string
+  treated_by: number | null // ใครเลี้ยง (B19) · null + treat = คนจ่ายเลี้ยง (ข้อมูลก่อน B19)
   shares: [number, number]; payer: Slot
 }
 export type Slip = {
@@ -40,9 +42,11 @@ export type Settlement = {
 export type NewExpense = {
   coupleId: number; paidBy: number; amount: number; merchant: string; category?: string | null; occurredAt: string; day: string
   mode: SplitMode; ratio?: number | null; source: Expense['source']; slipId?: number | null; createdBy: number | null
+  treatedBy?: number | null // ใครเลี้ยง (ปรับตามโหมดด้วย treaterOf)
   createdAt?: string // เวลาจากนาฬิกาของแอป (ไม่ใส่ = เวลา DB)
 }
-export type ExpensePatch = Partial<{ merchant: string; amount: number; mode: SplitMode; ratio: number | null; paidBy: number; category: string | null }>
+/** treatedBy ไม่ใส่ + เปลี่ยน mode = ล้างคนเลี้ยง · ไม่ใส่ทั้งคู่ = คงเดิม (ปรับตามโหมด/คนจ่ายใหม่ด้วย treaterOf) */
+export type ExpensePatch = Partial<{ merchant: string; amount: number; mode: SplitMode; ratio: number | null; paidBy: number; category: string | null; treatedBy: number | null }>
 
 type Row = Record<string, SQLInputValue>
 
@@ -89,9 +93,19 @@ export class Repo {
   allCouples() {
     return this.all<Couple>('SELECT * FROM couples ORDER BY id')
   }
-  createCouple(groupId: string, minTransfer = 5000): Couple {
-    this.run('INSERT OR IGNORE INTO couples (line_group_id, min_transfer) VALUES (?, ?)', groupId, minTransfer)
+  /** createdAt: เวลาจากนาฬิกาของแอป (ไม่ใส่ = เวลา DB) · ใช้กันสรุปวันก่อนที่คู่ถูกสร้าง */
+  createCouple(groupId: string, minTransfer = 5000, createdAt?: string): Couple {
+    this.run("INSERT OR IGNORE INTO couples (line_group_id, min_transfer, created_at) VALUES (?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%SZ','now')))", groupId, minTransfer, createdAt ?? null)
     return this.coupleByGroup(groupId)!
+  }
+  /**
+   * วันทางบัญชีที่รายการใหม่ควรเข้า ณ เวลา ms = businessDay ตามเวลาสรุปของคู่ แต่ไม่ก่อนวันถัดจากสรุปล่าสุด
+   * (เลื่อนเวลาสรุปให้ช้าลงหลังสรุปไปแล้ว เช่น 21:00 → 23:00 ตอน 22:00 · รายการช่วงนั้นต้องไม่ตกไปอยู่ในวันที่ปิดแล้ว)
+   */
+  dayOf(couple: Couple, ms: number) {
+    const d = businessDay(ms, couple.settle_time)
+    const last = this.latestSummary(couple.id)?.date
+    return last && last >= d ? addDays(last, 1) : d
   }
   updateCouple(id: number, p: CoupleSettings, memberId: number | null) {
     const before = this.couple(id)!
@@ -203,9 +217,10 @@ export class Repo {
   createExpense(n: NewExpense): Expense {
     return this.tx(() => {
       const id = this.run(
-        `INSERT INTO expenses (couple_id, paid_by, amount_satang, merchant, category, occurred_at, day, split_mode, ratio, source, slip_id, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%SZ','now')))`,
-        n.coupleId, n.paidBy, n.amount, n.merchant, n.category ?? null, n.occurredAt, n.day, n.mode, n.ratio ?? null, n.source, n.slipId ?? null, n.createdBy, n.createdAt ?? null,
+        `INSERT INTO expenses (couple_id, paid_by, amount_satang, merchant, category, occurred_at, day, split_mode, ratio, source, slip_id, created_by, treated_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%SZ','now')))`,
+        n.coupleId, n.paidBy, n.amount, n.merchant, n.category ?? null, n.occurredAt, n.day, n.mode, n.ratio ?? null, n.source, n.slipId ?? null, n.createdBy,
+        treaterOf(n.mode, n.paidBy, n.treatedBy), n.createdAt ?? null,
       )
       const e = this.get<Expense>('SELECT * FROM expenses WHERE id = ?', id)!
       this.writeShares(e)
@@ -239,8 +254,9 @@ export class Repo {
         paid_by: p.paidBy ?? before.paid_by,
         category: p.category !== undefined ? p.category : before.category,
       }
-      this.run('UPDATE expenses SET merchant = ?, amount_satang = ?, split_mode = ?, ratio = ?, paid_by = ?, category = ? WHERE id = ?',
-        next.merchant, next.amount_satang, next.split_mode, next.ratio, next.paid_by, next.category, id)
+      const treated = p.treatedBy !== undefined ? p.treatedBy : p.mode !== undefined ? null : before.treated_by
+      this.run('UPDATE expenses SET merchant = ?, amount_satang = ?, split_mode = ?, ratio = ?, paid_by = ?, category = ?, treated_by = ? WHERE id = ?',
+        next.merchant, next.amount_satang, next.split_mode, next.ratio, next.paid_by, next.category, treaterOf(next.split_mode, next.paid_by, treated), id)
       this.writeShares({ ...before, ...next })
       const after = this.expense(id)!
       this.adjustIfClosed(before, after, today, 'แก้รายการของวันที่ปิดยอดแล้ว')

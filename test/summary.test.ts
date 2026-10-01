@@ -134,7 +134,7 @@ test('ต่ำกว่าขั้นต่ำ → ทบ ไม่ push · �
   assert.match((t.line.take()[0].messages[0] as any).altText, /฿70\.00/)
 })
 
-test('ยอด 0: มีรายการ → "วันนี้ไม่มีใครติดใคร" · ไม่มีรายการเลย → ไม่ push', async () => {
+test('ยอด 0: มีรายการ → "สรุปวันนี้ (วันที่): ไม่มีใครติดใคร" · ไม่มีรายการเลย → ไม่ push', async () => {
   const t = makeCtx({ now: at('08:00') })
   const send = (e: any) => handleEvent(t.ctx, e, handlers)
   await send(ev.text(A_ID, 'หวัดดี'))
@@ -148,7 +148,7 @@ test('ยอด 0: มีรายการ → "วันนี้ไม่ม�
   t.line.take()
   t.clock.t = at('21:00', '2026-09-30')
   await runSummary(t.ctx)
-  assert.match(t.line.texts()[0], /วันนี้ไม่มีใครติดใคร/)
+  assert.match(t.line.texts()[0], /"สรุปวันนี้ \(30 ก\.ย\.\): ไม่มีใครติดใคร/)
 })
 
 test('push ล้ม → รันรอบถัดไปส่งใหม่ (ไม่หาย ไม่ซ้ำ)', async () => {

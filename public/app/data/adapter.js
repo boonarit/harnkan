@@ -7,7 +7,7 @@
 //        deleteExpense(id) · saveSettings(patch) · settleQr() · slipImage(id)
 //        deleteSettlement(id) · closeBalance() · countSlip(id) · wipeInfo() · wipeAll(confirm)
 import { dailyNet } from '#domain/balance.js'
-import { effect, splitShares } from '#domain/split.js'
+import { effect, splitShares, treaterOf } from '#domain/split.js'
 import { businessDay } from '#domain/time.js'
 import { validateName } from '#domain/name.js'
 
@@ -93,7 +93,7 @@ export class ApiAdapter {
 
 /**
  * @typedef {{ id: number, merchant: string, amount: number, paid_by: number, split_mode: string, ratio: number | null,
- *   day: string, occurred_at: string, source: string, slip_id: number | null, category: string | null, status: string, created_by: number }} LocalExpense
+ *   day: string, occurred_at: string, source: string, slip_id: number | null, category: string | null, status: string, created_by: number, treated_by?: number | null }} LocalExpense
  * @typedef {{ members: { id: number, display_name: string, promptpay_id: string | null, bank_names: string[] }[],
  *   settings: { settle_time: string, min_transfer: number, default_split: string, ai_daily_cap: number, slip_retention_days: number },
  *   expenses: LocalExpense[], settlements: { id: number, from: number, to: number, amount: number, day: string, kind?: string }[],
@@ -137,7 +137,7 @@ export class LocalAdapter {
   toJson(s, e) {
     const payer = /** @type {0 | 1} */ (s.members.findIndex((m) => m.id === e.paid_by))
     const shares = splitShares(e.amount, /** @type {any} */ (e.split_mode), payer, e.id, e.ratio ?? 50)
-    return { ...e, payer, shares, effect: effect(payer, shares) }
+    return { ...e, payer, shares, effect: effect(payer, shares), treated_by: treaterOf(/** @type {any} */ (e.split_mode), e.paid_by, e.treated_by) }
   }
   /** @param {LocalState} s @param {string} day */
   dayNet(s, day) {
@@ -210,6 +210,7 @@ export class LocalAdapter {
       ratio: b.ratio ?? null, day: this.todayDay, occurred_at: new Date(this.now()).toISOString(), source: b.source ?? 'manual',
       slip_id: null, category: b.category ?? null, status: 'active', created_by: b.created_by ?? s.me,
     }
+    e.treated_by = treaterOf(/** @type {any} */ (e.split_mode), e.paid_by, b.treated_by)
     s.expenses.push(e)
     s.audit.push({ entity_id: e.id, action: 'create', member_id: e.created_by })
     this.save(s)
@@ -225,6 +226,8 @@ export class LocalAdapter {
     if (p.split_mode !== undefined) e.split_mode = p.split_mode
     if (p.ratio !== undefined) e.ratio = p.ratio
     if (p.paid_by !== undefined) e.paid_by = p.paid_by
+    // เหมือน server: ไม่ส่ง treated_by แต่เปลี่ยนโหมด = ล้างคนเลี้ยง
+    e.treated_by = treaterOf(/** @type {any} */ (e.split_mode), e.paid_by, p.treated_by !== undefined ? p.treated_by : p.split_mode !== undefined ? null : e.treated_by)
     s.audit.push({ entity_id: id, action: 'update', member_id: s.me })
     this.save(s)
     return { expense: this.toJson(s, e) }

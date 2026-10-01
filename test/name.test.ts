@@ -40,8 +40,8 @@ test('validateName ปฏิเสธทุกคำที่ parser ใช้ (
 })
 
 test('parser: ครึ่ง = half · ตั้งชื่อ <ชื่อ> = คำสั่งเปลี่ยนชื่อ', () => {
-  assert.deepEqual(parseMessage('กาแฟ 90 ครึ่ง'), { kind: 'expense', merchant: 'กาแฟ', amount: 9000, mode: 'half', forName: null })
-  assert.deepEqual(parseMessage('ข้าว 120 หารครึ่ง'), { kind: 'expense', merchant: 'ข้าว', amount: 12000, mode: 'half', forName: null })
+  assert.deepEqual(parseMessage('กาแฟ 90 ครึ่ง'), { kind: 'expense', merchant: 'กาแฟ', amount: 9000, mode: 'half', forName: null, treatName: null })
+  assert.deepEqual(parseMessage('ข้าว 120 หารครึ่ง'), { kind: 'expense', merchant: 'ข้าว', amount: 12000, mode: 'half', forName: null, treatName: null })
   assert.deepEqual(parseMessage('ตั้งชื่อ แตงโม'), { kind: 'command', command: 'rename', name: 'แตงโม' })
   assert.deepEqual(parseMessage('ตั้งชื่อ'), { kind: 'command', command: 'rename', name: '' })
   assert.equal(parseMessage('ตั้งชื่อลูก 500')?.kind, 'expense')

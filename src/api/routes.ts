@@ -5,9 +5,9 @@ import QRCode from 'qrcode'
 import type { Ctx } from '../app.ts'
 import type { Couple, CoupleSettings, Expense, ExpensePatch, Member, Settlement, Slip } from '../db/repo.ts'
 import { decide } from '../domain/balance.js'
-import { effect, MODES } from '../domain/split.js'
+import { effect, MODES, treaterOf } from '../domain/split.js'
 import type { SplitMode } from '../domain/split.js'
-import { addDays, businessDay } from '../domain/time.js'
+import { addDays } from '../domain/time.js'
 import { isPromptpayId, promptpayPayload } from '../promptpay/qr.ts'
 import { validateName } from '../domain/name.js'
 import { HttpError, readBody, send } from '../http.ts'
@@ -65,16 +65,17 @@ function ratio(v: unknown) {
   if (!isInt(v, 0, 100)) throw bad('ratio ต้องเป็น 0–100')
   return v
 }
-function memberId(v: unknown, a: Auth) {
-  if (!a.members.some((m) => m.id === v)) throw bad('paid_by ต้องเป็นสมาชิกของคู่นี้')
+function memberId(v: unknown, a: Auth, field = 'paid_by') {
+  if (!a.members.some((m) => m.id === v)) throw bad(`${field} ต้องเป็นสมาชิกของคู่นี้`)
   return v as number
 }
+const treatedBy = (v: unknown, a: Auth) => (v === null ? null : memberId(v, a, 'treated_by'))
 
 export function expenseJson(e: Expense) {
   return {
     id: e.id, merchant: e.merchant, amount: e.amount_satang, paid_by: e.paid_by, payer: e.payer, split_mode: e.split_mode,
     ratio: e.ratio, shares: e.shares, effect: effect(e.payer, e.shares), day: e.day, occurred_at: e.occurred_at,
-    category: e.category, source: e.source, slip_id: e.slip_id, status: e.status,
+    category: e.category, source: e.source, slip_id: e.slip_id, status: e.status, treated_by: treaterOf(e.split_mode, e.paid_by, e.treated_by),
   }
 }
 const memberJson = (m: Member) => ({
@@ -124,7 +125,7 @@ export async function handleApi(ctx: Ctx, req: IncomingMessage, res: ServerRespo
   if (!url.pathname.startsWith('/api/')) return false
   const a = await authenticate(ctx, req, url)
   const { repo } = ctx
-  const today = businessDay(ctx.now(), a.couple.settle_time)
+  const today = ctx.repo.dayOf(a.couple, ctx.now())
   const p = url.pathname
   const M = req.method
   let m: RegExpMatchArray | null
@@ -204,6 +205,7 @@ export async function handleApi(ctx: Ctx, req: IncomingMessage, res: ServerRespo
         else if (k === 'split_mode') patch.mode = mode(b.split_mode)
         else if (k === 'ratio') patch.ratio = ratio(b.ratio)
         else if (k === 'paid_by') patch.paidBy = memberId(b.paid_by, a)
+        else if (k === 'treated_by') patch.treatedBy = treatedBy(b.treated_by, a)
         else if (k === 'category') patch.category = b.category === null ? null : text(b.category, 'category', 30)
         else throw bad(`แก้ ${k} ไม่ได้`)
       }
@@ -217,7 +219,8 @@ export async function handleApi(ctx: Ctx, req: IncomingMessage, res: ServerRespo
       coupleId: a.couple.id, paidBy: b.paid_by === undefined ? a.member.id : memberId(b.paid_by, a), amount: amount(b.amount),
       merchant: b.merchant === undefined ? 'ไม่ระบุ' : text(b.merchant, 'merchant'), category: null,
       occurredAt: new Date(ctx.now()).toISOString(), day: today, mode: b.split_mode === undefined ? a.couple.default_split : mode(b.split_mode),
-      ratio: b.ratio === undefined ? null : ratio(b.ratio), source: 'manual', createdBy: a.member.id, createdAt: new Date(ctx.now()).toISOString(),
+      ratio: b.ratio === undefined ? null : ratio(b.ratio), treatedBy: b.treated_by === undefined ? null : treatedBy(b.treated_by, a),
+      source: 'manual', createdBy: a.member.id, createdAt: new Date(ctx.now()).toISOString(),
     })
     return send(res, 201, { expense: expenseJson(e) }), true
   }

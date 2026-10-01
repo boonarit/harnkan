@@ -4,6 +4,7 @@ import { LocalAdapter } from '../public/app/data/adapter.js'
 import { baht, esc, modeLabel, netSentence } from '../public/app/format.js'
 import { refresh, start } from '../public/app/main.js'
 import { parseMessage } from '#domain/parse.js'
+import { treatSplit } from '#domain/split.js'
 import { demoSeed } from './seed.js'
 
 /** localStorage ใช้ไม่ได้ (private mode) → เก็บในหน่วยความจำแทน */
@@ -49,16 +50,18 @@ async function card(e, title = '✓ บันทึกแล้ว') {
   const ms = members()
   const eff = e.effect === 0 ? 'ไม่นับเข้ายอด' : `${ms[e.effect > 0 ? 1 : 0].display_name} ค้าง ${ms[e.effect > 0 ? 0 : 1].display_name} ${baht(Math.abs(e.effect))}`
   const owner = (slot) => (slot === e.payer ? 'mine' : 'theirs')
+  const treat = (m) => JSON.stringify(treatSplit(m.id, e.paid_by))
   const li = push(`<span class="from">หารกัน</span><span class="ok">${title}</span>
     <div class="t"><span>${esc(e.merchant)}</span><span>${baht(e.amount)}</span></div>
     จ่ายโดย ${esc(nameOf(e.paid_by))} · ${esc(modeLabel(e, ms))}<br>ผลต่อยอด: ${esc(eff)}<br><b>ยอดตอนนี้: ${esc(netSentence(t.net, ms))} ${t.net ? baht(Math.abs(t.net)) : ''}</b>
-    <div class="quick">${[['หารครึ่ง', 'half'], [`ของ${ms[0].display_name}`, owner(0)], [`ของ${ms[1].display_name}`, owner(1)], ['เลี้ยง', 'treat']]
-      .map(([l, m]) => `<button type="button" data-mode="${m}">${esc(l)}</button>`).join('')}</div>`, 'card')
+    <div class="quick">${[['หารครึ่ง', JSON.stringify({ mode: 'half' })], ...ms.map((m, i) => [`ของ${m.display_name}`, JSON.stringify({ mode: owner(i) })]), ...ms.map((m) => [`${m.display_name}เลี้ยง`, treat(m)])]
+      .map(([l, m]) => `<button type="button" data-mode="${esc(m)}">${esc(l)}</button>`).join('')}</div>`, 'card')
   li.querySelector('.quick')?.addEventListener('click', async (ev) => {
     const b = /** @type {HTMLElement} */ (ev.target).closest('button')
     if (!b?.dataset.mode) return
     push(esc(b.textContent), 'me')
-    const { expense } = await api.updateExpense(e.id, { split_mode: b.dataset.mode })
+    const want = JSON.parse(b.dataset.mode)
+    const { expense } = await api.updateExpense(e.id, { split_mode: want.mode, treated_by: want.treatedBy ?? null })
     await card(expense, '✓ เปลี่ยนการหารแล้ว')
   })
   await updateHead()
@@ -85,8 +88,9 @@ async function say(text) {
     return void botText('เดโมไม่รองรับคำสั่งนี้')
   }
   const owner = ms.find((m) => m.display_name === intent.forName)
-  const split_mode = intent.mode ?? (owner ? (owner.id === speaker ? 'mine' : 'theirs') : api.state.settings.default_split)
-  const { expense } = await api.addExpense({ amount: intent.amount, merchant: intent.merchant, paid_by: speaker, split_mode, created_by: speaker, source: 'text' })
+  const treater = ms.find((m) => m.display_name === intent.treatName)
+  const split = treater ? treatSplit(treater.id, speaker) : { mode: intent.mode ?? (owner ? (owner.id === speaker ? 'mine' : 'theirs') : api.state.settings.default_split), treatedBy: null }
+  const { expense } = await api.addExpense({ amount: intent.amount, merchant: intent.merchant, paid_by: speaker, split_mode: split.mode, treated_by: split.treatedBy, created_by: speaker, source: 'text' })
   await card(expense)
 }
 

@@ -1,7 +1,7 @@
 // @ts-check
 // ตัวช่วยแสดงผล (pure) — ใช้ทั้งแอปจริงและเดโม และเทสต์ด้วย node:test ได้
 import { formatBaht, parseAmount } from '#domain/money.js'
-import { effect, splitShares } from '#domain/split.js'
+import { effect, modeLabel, splitShares } from '#domain/split.js'
 
 export { formatBaht as baht, parseAmount }
 
@@ -58,38 +58,34 @@ export function netSentence(net, members) {
 }
 
 /**
- * ปุ่มโหมดหารในหน้าจอ: "half" | "0" (ของคนที่ 1) | "1" (ของคนที่ 2) | "treat" → split_mode ตามคนจ่าย
- * @param {'half' | '0' | '1' | 'treat'} chip @param {0 | 1} payer
+ * ปุ่มโหมดหารในหน้าจอ: "half" | "0" (ของคนที่ 1) | "1" (ของคนที่ 2) | "t0" (คนที่ 1 เลี้ยง) | "t1" (คนที่ 2 เลี้ยง) → split_mode ตามคนจ่าย
+ * @param {'half' | '0' | '1' | 't0' | 't1' | 'treat'} chip @param {0 | 1} payer
  * @returns {'half' | 'mine' | 'theirs' | 'treat'}
  */
 export function chipToMode(chip, payer) {
   if (chip === 'half' || chip === 'treat') return chip
+  if (chip === 't0' || chip === 't1') return Number(chip[1]) === payer ? 'treat' : 'theirs'
   return Number(chip) === payer ? 'mine' : 'theirs'
 }
 
-/** @param {string} mode @param {0 | 1} payer @returns {'half' | '0' | '1' | 'treat' | 'ratio'} */
-export function modeToChip(mode, payer) {
+/** คนเลี้ยง (member id) ของปุ่ม t0/t1 · ปุ่มอื่น = null @param {string} chip @param {Member[]} members */
+export function chipTreatedBy(chip, members) {
+  return chip === 't0' || chip === 't1' ? members[Number(chip[1])].id : null
+}
+
+/**
+ * @param {string} mode @param {0 | 1} payer @param {number} [treaterSlot] slot ของคนเลี้ยง (-1 = ไม่มี)
+ * @returns {'half' | '0' | '1' | 't0' | 't1' | 'ratio'}
+ */
+export function modeToChip(mode, payer, treaterSlot = -1) {
+  if (mode === 'treat') return /** @type {'t0' | 't1'} */ (`t${payer}`)
+  if (mode === 'theirs' && treaterSlot >= 0 && treaterSlot !== payer) return /** @type {'t0' | 't1'} */ (`t${treaterSlot}`)
   if (mode === 'mine') return /** @type {'0' | '1'} */ (String(payer))
   if (mode === 'theirs') return /** @type {'0' | '1'} */ (String(1 - payer))
   return /** @type {any} */ (mode)
 }
 
-/**
- * ป้ายโหมดหาร
- * @param {{ split_mode: string, ratio?: number | null, payer: 0 | 1 }} e @param {Member[]} members
- */
-export function modeLabel(e, members) {
-  const payer = members[e.payer]?.display_name ?? '?'
-  const other = members[1 - e.payer]?.display_name ?? '?'
-  switch (e.split_mode) {
-    case 'half': return 'หารครึ่ง'
-    case 'mine': return `ของ${payer}`
-    case 'theirs': return `ของ${other}`
-    case 'treat': return `${payer}เลี้ยง`
-    case 'ratio': return `${payer} ${e.ratio}% / ${other} ${100 - (e.ratio ?? 50)}%`
-    default: return e.split_mode
-  }
-}
+export { modeLabel }
 
 /**
  * พรีวิวก่อนบันทึก: ผลต่อยอดของรายการนี้ + ยอดใหม่ (ใช้ splitShares ตัวเดียวกับ server)

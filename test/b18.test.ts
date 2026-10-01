@@ -291,7 +291,7 @@ test('ปุ่มเปิดแอป (B18-6): การ์ดรายกา�
       for (const o of [card, app, setupCard, summary]) assert.deepEqual(uris(o), [])
       assert.match(txt(app), /ยังไม่ได้ตั้ง LIFF_ID/)
       assert.match(txt(card), /บันทึกแล้ว/)
-      assert.match(txt(summary), /สรุปยอด/)
+      assert.match(txt(summary), /สรุปวันนี้ \(29 ก\.ย\.\)/)
       assert.ok(!JSON.stringify([card, setupCard, summary]).includes('"type":"uri"'), 'ไม่มีปุ่ม uri เลย')
     }
   }
@@ -402,7 +402,7 @@ test('migrate v3 (หลัง B17) ที่มีข้อมูล → v4: �
   assert.equal(before, 25000)
   migrate(db)
   const r = new Repo(db)
-  assert.equal(db.prepare('PRAGMA user_version').get()!.user_version, 4)
+  assert.equal(db.prepare('PRAGMA user_version').get()!.user_version, MIGRATIONS.length) // v4 ขึ้นไป (B19 เพิ่ม v5)
   assert.equal(r.ledger(1, '2026-09-29').net, before)
   assert.deepEqual([r.couple(1)!.stale_slip_hours, r.couple(1)!.dup_window_minutes], [12, null])
   const m = r.member(1)!

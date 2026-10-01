@@ -20,7 +20,7 @@
   </dict>
   <key>StandardOutPath</key><string>__HOME__/data/harnkan/logs/summary.stdout.log</string>
   <key>StandardErrorPath</key><string>__HOME__/data/harnkan/logs/summary.stdout.log</string>
-  <key>StartCalendarInterval</key>
-  <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>0</integer></dict>
+  <!-- ทุก 10 นาที (= SUMMARY_EVERY_MIN ใน src/domain/time.js) · งานสรุปเฉพาะคู่ที่เลยเวลาสรุปที่ตั้งในแอปแล้วและยังไม่มีสรุปของวันนั้น -->
+  <key>StartInterval</key><integer>600</integer>
 </dict>
 </plist>

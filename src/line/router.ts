@@ -1,5 +1,6 @@
 import type { Ctx } from '../app.ts'
 import type { Couple, Member } from '../db/repo.ts'
+import { clip, NAME_MAX } from '../domain/name.js'
 import { log } from '../log.ts'
 import { onboardCard, registeredText } from '../onboard.ts'
 import type { LineClient, Message } from './client.ts'
@@ -24,7 +25,7 @@ export async function resolveSender(ctx: Ctx, ev: LineEvent): Promise<{ couple: 
   const groupId = ev.source?.groupId
   const userId = ev.source?.userId
   if (ev.source?.type !== 'group' || !groupId || !userId) return null
-  const couple = ctx.repo.coupleByGroup(groupId) ?? ctx.repo.createCouple(groupId, ctx.cfg.minTransfer)
+  const couple = ctx.repo.coupleByGroup(groupId) ?? ctx.repo.createCouple(groupId, ctx.cfg.minTransfer, new Date(ctx.now()).toISOString())
   let member = ctx.repo.memberByLineUser(couple.id, userId)
   if (!member) {
     if (ctx.repo.members(couple.id).length >= 2) {
@@ -43,7 +44,7 @@ export async function resolveSender(ctx: Ctx, ev: LineEvent): Promise<{ couple: 
     })
     // ตัดตาม code point (slice ของ string ผ่ากลางอีโมจิได้) · B18 สืบชื่อ "T": log แค่ความยาว ห้าม log ตัวชื่อ
     const raw = String(profile.displayName ?? '')
-    const name = [...raw].slice(0, 40).join('') || 'ไม่ทราบชื่อ'
+    const name = clip(raw, NAME_MAX) || 'ไม่ทราบชื่อ'
     member = ctx.repo.addMember(couple.id, userId, name)
     log.info('member_registered', { couple: couple.id, member: member.id, name_len: [...raw].length, source })
     return { couple, member, members: ctx.repo.members(couple.id), isNew: true }
@@ -79,7 +80,7 @@ function prefixReplies(ctx: Ctx, first: Message[]) {
 export async function handleEvent(ctx: Ctx, ev: LineEvent, h: Handlers = {}) {
   log.info('webhook_event', { type: ev.type, msg: ev.message?.type })
   if (ev.type === 'join' && ev.source?.type === 'group' && ev.source.groupId) {
-    const couple = ctx.repo.createCouple(ev.source.groupId, ctx.cfg.minTransfer)
+    const couple = ctx.repo.createCouple(ev.source.groupId, ctx.cfg.minTransfer, new Date(ctx.now()).toISOString())
     if (ev.replyToken) await ctx.line.reply(ev.replyToken, [onboardCard(ctx, ctx.repo.members(couple.id), 'สวัสดี! หารกันพร้อมแล้ว ✨')])
     return
   }

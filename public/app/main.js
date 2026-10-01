@@ -1,6 +1,7 @@
 // @ts-check
 // router + หน้าจอทั้งหมด (ES module ธรรมดา ไม่มี framework)
-import { baht, chipToMode, esc, modeLabel, modeToChip, monthGrid, netSentence, parseAmount, preview, shiftMonth, thaiDate, thaiMonth, WEEKDAYS } from './format.js'
+import { baht, chipToMode, chipTreatedBy, esc, modeLabel, modeToChip, monthGrid, netSentence, parseAmount, preview, shiftMonth, thaiDate, thaiMonth, WEEKDAYS } from './format.js'
+import { SUMMARY_EVERY_MIN } from '#domain/time.js'
 
 /** @typedef {import('./data/adapter.js').ApiAdapter | import('./data/adapter.js').LocalAdapter} Adapter */
 
@@ -99,10 +100,10 @@ async function viewToday() {
 }
 
 // ---------- ฟอร์มรายการ (เพิ่ม/แก้ไข) ----------
-function expenseForm({ title, amount = 0, merchant = '', paidBy, mode, net, editing = null }) {
+function expenseForm({ title, amount = 0, merchant = '', paidBy, mode, treatedBy = null, net, editing = null }) {
   let digits = amount ? (amount / 100).toFixed(2).replace(/\.00$/, '') : ''
   let payer = payerSlot(paidBy)
-  let chip = modeToChip(mode, payer)
+  let chip = modeToChip(mode, payer, treatedBy == null ? -1 : payerSlot(treatedBy))
   const [m0, m1] = me.members
   $app().innerHTML = `
     <h1>${title}</h1>
@@ -122,7 +123,8 @@ function expenseForm({ title, amount = 0, merchant = '', paidBy, mode, net, edit
       <button type="button" class="chip" data-chip="half">หารครึ่ง</button>
       <button type="button" class="chip p0" data-chip="0">ของ${esc(m0.display_name)}</button>
       <button type="button" class="chip p1" data-chip="1">ของ${esc(m1.display_name)}</button>
-      <button type="button" class="chip" data-chip="treat">เลี้ยง</button>
+      <button type="button" class="chip p0" data-chip="t0">${esc(m0.display_name)}เลี้ยง</button>
+      <button type="button" class="chip p1" data-chip="t1">${esc(m1.display_name)}เลี้ยง</button>
     </div>
     <div class="preview" data-testid="preview" aria-live="polite"></div>
     <div class="actions">
@@ -151,11 +153,11 @@ function expenseForm({ title, amount = 0, merchant = '', paidBy, mode, net, edit
       if (k === '⌫') digits = digits.slice(0, -1)
       else if (k === '.' ? !digits.includes('.') : !/\.\d\d$/.test(digits) && digits.replace('.', '').length < 9) digits = digits === '0' && k !== '.' ? k : digits + k
     } else if (b.dataset.payer) {
-      // chip "ของเอ" ยังเป็นของเอ แม้เปลี่ยนคนจ่าย
+      // chip "ของเอ" / "เอเลี้ยง" ยังเป็นของเอ แม้เปลี่ยนคนจ่าย
       payer = /** @type {0 | 1} */ (Number(b.dataset.payer))
     } else if (b.dataset.chip) chip = /** @type {any} */ (b.dataset.chip)
     else if (b.dataset.act === 'save') {
-      const body = { amount: satang(), merchant: /** @type {HTMLInputElement} */ (q('#merchant')).value.trim() || 'ไม่ระบุ', paid_by: me.members[payer].id, split_mode: chip === 'ratio' ? 'ratio' : chipToMode(/** @type {any} */ (chip), payer) }
+      const body = { amount: satang(), merchant: /** @type {HTMLInputElement} */ (q('#merchant')).value.trim() || 'ไม่ระบุ', paid_by: me.members[payer].id, split_mode: chip === 'ratio' ? 'ratio' : chipToMode(/** @type {any} */ (chip), payer), treated_by: chipTreatedBy(chip, me.members) }
       b.setAttribute('disabled', '')
       try {
         if (editing) await api.updateExpense(editing.id, body)
@@ -195,7 +197,7 @@ async function viewDetail(id) {
     return
   }
   // แก้รายการวันเก่า: ผลต่างเข้ายอดวันนี้ (ยอดปรับปรุง) จึงพรีวิวจากยอดวันนี้เสมอ
-  expenseForm({ title: 'รายละเอียด / แก้ไข', amount: e.amount, merchant: e.merchant, paidBy: e.paid_by, mode: e.split_mode, net: t.net, editing: e })
+  expenseForm({ title: 'รายละเอียด / แก้ไข', amount: e.amount, merchant: e.merchant, paidBy: e.paid_by, mode: e.split_mode, treatedBy: e.treated_by, net: t.net, editing: e })
   const info = document.createElement('p')
   info.className = 'muted'
   info.textContent = `วันที่ ${thaiDate(e.day)} · ที่มา: ${{ text: 'พิมพ์ในแชท', slip: 'สลิป', manual: 'เพิ่มในแอป' }[e.source] ?? e.source} · แก้ไข ${audit.filter((a) => a.action === 'update').length} ครั้ง`
@@ -333,10 +335,11 @@ async function viewSettings() {
       <label for="account_suffixes">เลขท้ายบัญชี 4 ตัว</label><input id="account_suffixes" inputmode="numeric" placeholder="เช่น 1234" aria-describedby="account_suffixes-help" value="${esc((mine.account_suffixes ?? []).join(', '))}">
       <p class="help" id="account_suffixes-help">ดูจากสลิปที่เคยโอน ช่องที่เป็น xxx-xxx-1234 · ไม่บังคับ แต่ทำให้แม่นขึ้น · หลายบัญชีคั่นด้วย ,</p>
       <h2>ของคู่เรา</h2>
-      <label for="settle_time">เวลาสรุปยอด</label><input id="settle_time" type="time" value="${esc(s.settle_time)}">
+      <label for="settle_time">เวลาสรุปยอด</label><input id="settle_time" type="time" aria-describedby="settle_time-help" value="${esc(s.settle_time)}">
+      <p class="help" id="settle_time-help">การ์ดสรุปจะมาภายใน ${SUMMARY_EVERY_MIN} นาทีหลังเวลานี้ · เปลี่ยนแล้วมีผลตั้งแต่รอบถัดไป</p>
       <label for="min_transfer">ยอดขั้นต่ำที่จะเรียกเก็บ (บาท)</label><input id="min_transfer" inputmode="decimal" value="${s.min_transfer / 100}">
       <label for="default_split">หารแบบไหนเป็นค่าเริ่ม</label>
-      <select id="default_split">${['half', 'mine', 'theirs', 'treat'].map((m) => `<option value="${m}" ${m === s.default_split ? 'selected' : ''}>${{ half: 'หารครึ่ง', mine: 'ของคนจ่าย', theirs: 'ของอีกคน', treat: 'เลี้ยง' }[m]}</option>`).join('')}</select>
+      <select id="default_split">${['half', 'mine', 'theirs', 'treat'].map((m) => `<option value="${m}" ${m === s.default_split ? 'selected' : ''}>${{ half: 'หารครึ่ง', mine: 'ของคนจ่าย', theirs: 'ของอีกคน', treat: 'คนจ่ายเลี้ยง' }[m]}</option>`).join('')}</select>
       <label for="ai_daily_cap">อ่านสลิปด้วย AI สูงสุดต่อวัน (รูป)</label><input id="ai_daily_cap" inputmode="numeric" value="${s.ai_daily_cap}">
       <label for="slip_retention_days">เก็บรูปสลิปกี่วัน</label><input id="slip_retention_days" inputmode="numeric" value="${s.slip_retention_days}">
       <label for="stale_slip_hours">สลิปเก่ากว่ากี่ชั่วโมงให้ถามก่อนนับ</label><input id="stale_slip_hours" inputmode="numeric" aria-describedby="stale_slip_hours-help" value="${s.stale_slip_hours ?? 24}">

@@ -2,7 +2,8 @@
 import { parseAmount } from './money.js'
 
 /**
- * @typedef {{ kind: 'expense', merchant: string, amount: number, mode: 'treat' | 'half' | null, forName: string | null }} ExpenseIntent
+ * @typedef {{ kind: 'expense', merchant: string, amount: number, mode: 'treat' | 'half' | null, forName: string | null, treatName: string | null }} ExpenseIntent
+ *   treatName: "<ชื่อ>เลี้ยง" หน้า/ท้ายข้อความ (ชื่อสมาชิก) · null + mode treat = "เลี้ยง" เฉยๆ = คนจ่ายเลี้ยง
  * @typedef {{ kind: 'command', command: 'summary' | 'undo' | 'help' | 'deleteAll' | 'setup' | 'app' }} CommandIntent
  * @typedef {{ kind: 'command', command: 'rename', name: string }} RenameIntent
  */
@@ -11,8 +12,9 @@ import { parseAmount } from './money.js'
 const COMMANDS = /** @type {const} */ ({ สรุป: 'summary', ยกเลิก: 'undo', ช่วยด้วย: 'help', ลบข้อมูลทั้งหมด: 'deleteAll', ตั้งค่า: 'setup', แอป: 'app' })
 const RENAME = 'ตั้งชื่อ'
 const OWNER = 'ของ'
-/** คำหน้า/ท้ายรายการที่กำหนดโหมดหาร */
-const MODE_WORDS = /** @type {const} */ ({ เลี้ยง: 'treat', หารครึ่ง: 'half', ครึ่ง: 'half' })
+const TREAT = 'เลี้ยง'
+/** คำหน้า/ท้ายรายการที่กำหนดโหมดหาร · "<ชื่อ>เลี้ยง" = TREAT ติดท้ายชื่อสมาชิก (ชื่อห้ามมี marker จึงแยกได้ไม่กำกวม) */
+const MODE_WORDS = /** @type {const} */ ({ [TREAT]: 'treat', หารครึ่ง: 'half', ครึ่ง: 'half' })
 const CURRENCY = ['฿', 'บาท', 'บ']
 
 export const PARSER_WORDS = Object.freeze({
@@ -54,6 +56,17 @@ export function parseMessage(text, names = []) {
   if (t === RENAME || t.startsWith(`${RENAME} `)) return { kind: 'command', command: 'rename', name: t.slice(RENAME.length).trim() }
 
   let body = t
+  const sorted = [...names].filter(Boolean).sort((a, b) => b.length - a.length)
+  /** @type {string | null} */
+  let treatName = null
+  for (const n of sorted) {
+    const tag = `${n}${TREAT}`
+    if (body.endsWith(` ${tag}`)) body = body.slice(0, -tag.length) + TREAT
+    else if (body.startsWith(`${tag} `)) body = TREAT + body.slice(tag.length)
+    else continue
+    treatName = n
+    break
+  }
   /** @type {'treat' | 'half' | null} */
   let mode = null
   const pre = body.match(MODE_PREFIX)
@@ -73,14 +86,13 @@ export function parseMessage(text, names = []) {
 
   /** @type {string | null} */
   let forName = null
-  const sorted = [...names].sort((a, b) => b.length - a.length)
   for (const n of sorted) {
     const tag = `${OWNER}${n}`
-    if (n && merchant.includes(tag)) {
+    if (merchant.includes(tag)) {
       forName = n
       merchant = merchant.replace(tag, '').trim()
       break
     }
   }
-  return { kind: 'expense', merchant: merchant || 'ไม่ระบุ', amount, mode, forName }
+  return { kind: 'expense', merchant: merchant || 'ไม่ระบุ', amount, mode, forName, treatName: mode === 'treat' ? treatName : null }
 }

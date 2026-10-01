@@ -15,7 +15,7 @@ async function setup() {
   return { ...t, send, couple }
 }
 
-test('ข้อความรายการ → Flex card + quick reply 4 ปุ่ม', async () => {
+test('ข้อความรายการ → Flex card + quick reply 5 ปุ่ม (B19: <ชื่อ>เลี้ยง อ้าง member id)', async () => {
   const { send, line, repo, couple } = await setup()
   await send(ev.text(A_ID, 'กาแฟ 2 แก้ว 90'))
   const [out] = line.take()
@@ -29,13 +29,14 @@ test('ข้อความรายการ → Flex card + quick reply 4 ป�
   assert.match(body, /บี ค้าง เอ ฿45\.00/)
   assert.match(body, /บี โอนให้ เอ ฿45\.00/)
   const e = repo.expensesByDay(couple.id, '2026-09-29')[0]
-  assert.deepEqual(msg.quickReply.items.map((i: any) => i.action.data), [`split:${e.id}:half`, `split:${e.id}:mine`, `split:${e.id}:theirs`, `split:${e.id}:treat`])
-  assert.deepEqual(msg.quickReply.items.map((i: any) => i.action.label), ['หารครึ่ง', 'ของเอ', 'ของบี', 'เลี้ยง'])
+  const [a, b] = repo.members(couple.id)
+  assert.deepEqual(msg.quickReply.items.map((i: any) => i.action.data), [`split:${e.id}:half`, `split:${e.id}:mine`, `split:${e.id}:theirs`, `split:${e.id}:treat:${a.id}`, `split:${e.id}:treat:${b.id}`])
+  assert.deepEqual(msg.quickReply.items.map((i: any) => i.action.label), ['หารครึ่ง', 'ของเอ', 'ของบี', 'เอเลี้ยง', 'บีเลี้ยง'])
 
   // บีจ่าย: ปุ่ม "ของเอ" = theirs, "ของบี" = mine
   await send(ev.text(B_ID, 'ข้าว 240'))
   const qr = (line.take()[0].messages[0] as any).quickReply.items.map((i: any) => i.action.data.split(':')[2])
-  assert.deepEqual(qr, ['half', 'theirs', 'mine', 'treat'])
+  assert.deepEqual(qr, ['half', 'theirs', 'mine', 'treat', 'treat'])
 })
 
 test('ข้อความทั่วไป → บอทเงียบ', async () => {

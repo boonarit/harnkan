@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { parseMessage } from '../src/domain/parse.js'
 
 const names = ['เอ', 'บี']
-const exp = (merchant: string, amount: number, mode: 'treat' | null = null, forName: string | null = null) => ({ kind: 'expense', merchant, amount, mode, forName })
+const exp = (merchant: string, amount: number, mode: 'treat' | null = null, forName: string | null = null) => ({ kind: 'expense', merchant, amount, mode, forName, treatName: null })
 
 test('parse: รายการ', () => {
   const cases: [string, unknown][] = [

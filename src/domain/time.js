@@ -2,6 +2,9 @@
 // เวลาไทย (UTC+7 ไม่มี DST)
 const TZ = 7 * 3600_000
 
+/** launchd รันงานสรุปทุกกี่นาที (StartInterval ใน deploy/com.harnkan.summary.plist ต้องตรง · มีเทสต์) → การ์ดมาภายใน N นาทีหลังเวลาสรุป */
+export const SUMMARY_EVERY_MIN = 10
+
 /** @param {number} ms @returns {string} YYYY-MM-DD ตามเวลาไทย */
 export function bangkokDate(ms = Date.now()) {
   return new Date(ms + TZ).toISOString().slice(0, 10)
@@ -26,7 +29,7 @@ export function businessDay(ms = Date.now(), settleTime = '21:00') {
   return bangkokTime(ms) >= settleTime ? addDays(d, 1) : d
 }
 
-/** วันที่งานสรุปควรปิด = วันทางบัญชีก่อนหน้า (รัน 21:00 → วันนี้ · ตื่นมารันตอนตี 1 → เมื่อวาน) */
+/** วันที่งานสรุปควรปิด = วันทางบัญชีก่อนหน้า (เลยเวลาสรุปของวันนี้แล้ว → วันนี้ · ยังไม่ถึง → เมื่อวาน) */
 export function summaryDay(ms = Date.now(), settleTime = '21:00') {
   return addDays(businessDay(ms, settleTime), -1)
 }

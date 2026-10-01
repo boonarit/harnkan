@@ -1,7 +1,6 @@
 import type { Ctx } from './app.ts'
 import type { Couple, Member, Settlement } from './db/repo.ts'
 import { formatBaht } from './domain/money.js'
-import { businessDay } from './domain/time.js'
 import { netText } from './line/flex.ts'
 
 /**
@@ -12,7 +11,7 @@ export function recordSettlement(ctx: Ctx, couple: Couple, from: Member, to: Mem
   const { repo } = ctx
   return repo.tx(() => {
     const members = repo.members(couple.id)
-    const day = businessDay(ctx.now(), couple.settle_time)
+    const day = repo.dayOf(couple, ctx.now())
     const signed = members[1].id === from.id ? amount : -amount // ลด N เมื่อ B โอนให้ A
     const open = repo.latestSummary(couple.id, '9999-12-31')
     const owed = open ? repo.outstanding(open) : 0
@@ -49,7 +48,7 @@ export function carrySummary(ctx: Ctx, couple: Couple, summaryId: number, member
 export async function closeBalance(ctx: Ctx, couple: Couple, by: Member) {
   const { repo } = ctx
   const members = repo.members(couple.id)
-  const day = businessDay(ctx.now(), couple.settle_time)
+  const day = repo.dayOf(couple, ctx.now())
   const net = repo.ledger(couple.id, day).net
   if (net === 0) return null
   const [from, to] = net > 0 ? [members[1], members[0]] : [members[0], members[1]]

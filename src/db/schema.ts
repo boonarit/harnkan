@@ -134,6 +134,10 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE members ADD COLUMN bank_name TEXT;
   ALTER TABLE members ADD COLUMN bank_account TEXT;
   `,
+  // 5 (B19): เพิ่มอย่างเดียว — ใครเลี้ยง (split_mode มี CHECK เดิมแก้ไม่ได้) · ข้อมูลเดิม = null → treat เดิมแสดงเป็น "<คนจ่าย>เลี้ยง" ยอดเท่าเดิม
+  `
+  ALTER TABLE expenses ADD COLUMN treated_by INTEGER REFERENCES members(id) ON DELETE SET NULL;
+  `,
 ]
 
 export function openDb(path: string): DatabaseSync {

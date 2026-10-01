@@ -116,7 +116,7 @@ npm run demo
 | `npm run dev` | server โหมด fake ที่ `127.0.0.1:8787` |
 | `npm test` | เทสต์ทั้งหมด (ไม่ต่อเน็ต) |
 | `npm run check` | ตรวจความลับ ข้อมูลส่วนตัว และ API นอก Node 22 |
-| `npm run job:summary` | งานสรุปยอด 21:00 |
+| `npm run job:summary` | งานสรุปยอด (launchd รันทุก 10 นาที · สรุปเมื่อเลยเวลาที่ตั้งในแอป ค่าเริ่ม 21:00) |
 | `npm run job:backup` / `job:retention` | สำรอง DB / ลบรูปเก่า |
 | `npm run demo` | เสิร์ฟโหมดเดโม |
 

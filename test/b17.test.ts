@@ -192,7 +192,7 @@ test('ร้าน → default_split ของคู่ + ปุ่มเปล�
   repo.updateCouple(couple.id, { default_split: 'mine' }, null)
   const shop = await slip(A_ID, { amount: 100, receiver_name: 'ร้านสมมติ', merchant: 'ข้าว' })
   assert.equal(repo.expensesByDay(couple.id, DAY)[0].split_mode, 'mine')
-  assert.deepEqual(items(shop).map((x: any) => x.label), ['หารครึ่ง', 'ของเอ', 'ของบี', 'เลี้ยง', 'ไม่นับ'])
+  assert.deepEqual(items(shop).map((x: any) => x.label), ['หารครึ่ง', 'ของเอ', 'ของบี', 'เอเลี้ยง', 'บีเลี้ยง', 'ไม่นับ'])
   // เคลียร์ยอด → "ไม่ใช่เคลียร์ยอด" → หารครึ่ง
   const out = await slip(A_ID, { amount: 300, sender_name: 'นาย เอ ส.', receiver_name: 'น.ส. บี ส.' })
   assert.equal(net(), 30000)

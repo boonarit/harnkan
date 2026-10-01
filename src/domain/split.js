@@ -47,6 +47,46 @@ export function splitShares(amount, mode, payer, seq = 0, ratio = 50) {
 }
 
 /**
+ * ใครเลี้ยง (member id) ที่เก็บใน expenses.treated_by — ปรับให้สอดคล้องกับโหมดเสมอ
+ * treat = คนจ่ายเลี้ยง · theirs + อีกคนเลี้ยง = อีกคนรับทั้งก้อน (เงินเท่า "ของ<อีกคน>" แต่ป้ายบอกว่าเลี้ยง) · โหมดอื่น = ไม่มี
+ * @param {SplitMode} mode @param {number} paidBy @param {number | null | undefined} treatedBy
+ * @returns {number | null}
+ */
+export function treaterOf(mode, paidBy, treatedBy) {
+  if (mode === 'treat') return paidBy
+  return mode === 'theirs' && treatedBy != null && treatedBy !== paidBy ? treatedBy : null
+}
+
+/**
+ * ปุ่ม "<X>เลี้ยง" → โหมดเงิน: X เป็นคนจ่าย = treat (ไม่นับเข้ายอด) · X เป็นอีกคน = theirs (X รับทั้งก้อน)
+ * @param {number} treater member id ของคนเลี้ยง @param {number} paidBy
+ * @returns {{ mode: SplitMode, treatedBy: number }}
+ */
+export function treatSplit(treater, paidBy) {
+  return { mode: treater === paidBy ? 'treat' : 'theirs', treatedBy: treater }
+}
+
+/**
+ * ป้ายโหมดหาร (การ์ด LINE · แอป · เดโม) · ชื่อดึงจาก display_name ปัจจุบันตอนแสดง ไม่เก็บชื่อลง expense
+ * @param {{ split_mode: string, ratio?: number | null, payer: number, paid_by?: number, treated_by?: number | null }} e
+ * @param {{ id: number, display_name: string }[]} members
+ */
+export function modeLabel(e, members) {
+  const payer = members[e.payer]?.display_name ?? '?'
+  const other = members[1 - e.payer]?.display_name ?? '?'
+  const treater = e.split_mode === 'theirs' && e.treated_by != null ? members.find((m) => m.id === e.treated_by)?.display_name : null
+  if (treater) return `${treater}เลี้ยง`
+  switch (e.split_mode) {
+    case 'half': return 'หารครึ่ง'
+    case 'mine': return `ของ${payer}`
+    case 'theirs': return `ของ${other}`
+    case 'treat': return `${payer}เลี้ยง`
+    case 'ratio': return `${payer} ${e.ratio}% / ${other} ${100 - (e.ratio ?? 50)}%`
+    default: return e.split_mode
+  }
+}
+
+/**
  * ผลต่อยอดสุทธิ (บวก = B ต้องโอนให้ A)
  * @param {Slot} payer
  * @param {[number, number]} shares
