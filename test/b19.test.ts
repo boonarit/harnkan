@@ -132,13 +132,32 @@ test('เวลาสรุป (B19-1): เปลี่ยน settle 21:00 → 2
   assert.match(JSON.stringify(got[0].item.messages), /จาก 2 รายการ/)
 })
 
-test('เวลาสรุป (B19-1): ไม่ย้อนไปสรุปวันที่เก่ากว่าสรุปล่าสุด — 30 ก.ย. ไม่มีสรุป (เครื่องหลับ) · 1 ต.ค. สรุปแล้ว · เลื่อนเวลาสรุปเป็น 23:00 ตอน 22:00 → ไม่มีการ์ด 30 ก.ย. โผล่', async () => {
-  const t = await couple('2026-09-30')
-  await t.say(A_ID, 'กาแฟ 120', '10:00', '2026-10-01')
-  assert.equal((await t.tick(at('21:00', '2026-10-01'), at('21:00', '2026-10-01'))).length, 1)
+test('เวลาสรุป (B19-1): ไม่ย้อนไปสรุปวันที่เก่ากว่าสรุปล่าสุด — ข้อมูลเดิมก่อน B19 มีช่องว่าง (30 ก.ย. ไม่มีสรุป แต่ 1 ต.ค. มี) · เลื่อนเวลาสรุปเป็น 23:00 ตอน 22:00 → ไม่มีการ์ด 30 ก.ย. โผล่', async () => {
+  const t = await couple('2026-09-29')
+  t.clock.t = at('21:00', '2026-09-29')
+  await runSummary(t.ctx)
+  // งานสรุปรุ่นเก่า (ก่อน B19) ข้าม 30 ก.ย. แล้วสรุป 1 ต.ค. ไปแล้ว
+  t.repo.createSummary({ coupleId: t.c().id, date: '2026-10-01', net: 0, carriedIn: 0, action: 'zero', createdAt: new Date(at('21:00', '2026-10-01')).toISOString() })
   t.repo.updateCouple(t.c().id, { settle_time: '23:00' }, t.a.id)
   assert.deepEqual(await t.tick(at('22:00', '2026-10-01'), at('22:50', '2026-10-01')), [])
   assert.equal(t.repo.summary(t.c().id, '2026-09-30'), undefined)
+})
+
+test('เวลาสรุป (B19-1): เครื่องหลับข้ามเวลาสรุป 2 รอบ → รายการของวันที่ขาดไม่หลุดจากยอด · ส่งการ์ดเดียว (วันล่าสุด ระบุว่าย้อนหลัง + ยอดยกมา)', async () => {
+  const t = await couple('2026-09-29')
+  t.clock.t = at('21:00', '2026-09-29')
+  await runSummary(t.ctx)
+  await t.say(A_ID, 'กาแฟ 200', '10:00', '2026-09-30')
+  // หลับตั้งแต่ 30 ก.ย. 12:00 ถึง 2 ต.ค. 08:00 → ไม่มีรอบ 21:00 ของ 30 ก.ย. และ 1 ต.ค.
+  t.clock.t = at('08:00', '2026-10-02')
+  await runSummary(t.ctx)
+  const out = pushes(t.line.take())
+  assert.equal(out.length, 1)
+  assert.match(pushText(out[0]), /^สรุปย้อนหลัง 1 ต\.ค\.: บี โอนให้ เอ ฿100\.00/)
+  assert.match(JSON.stringify(out[0].messages), /ยอดยกมา ฿100\.00/)
+  assert.equal(t.repo.summary(t.c().id, '2026-09-30')!.action, 'carry')
+  assert.equal(t.repo.ledger(t.c().id, '2026-10-02').net, 10000)
+  assert.equal(health(t.ctx).stale, false)
 })
 
 test('เวลาสรุป (B19-1): ไม่สรุปวันก่อนที่คู่ถูกสร้าง (เช่นหลังลบข้อมูลทั้งหมด)', async () => {

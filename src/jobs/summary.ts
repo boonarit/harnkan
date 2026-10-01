@@ -1,7 +1,7 @@
 import type { Ctx } from '../app.ts'
 import type { Couple } from '../db/repo.ts'
 import { decide } from '../domain/balance.js'
-import { bangkokDate, businessDay, summaryDay } from '../domain/time.js'
+import { addDays, bangkokDate, businessDay, summaryDay } from '../domain/time.js'
 import { appUrl, summaryCard, thaiDate } from '../line/flex.ts'
 import { makeQrPng } from '../promptpay/qr.ts'
 import { log } from '../log.ts'
@@ -24,8 +24,16 @@ export async function summarizeCouple(ctx: Ctx, couple: Couple): Promise<Summary
   const skip = { coupleId: couple.id, date, action: 'skip' as const, pushed: false }
   if (members.length < 2) return skip
   // ไม่สรุปวันก่อนคู่ถูกสร้าง (เช่นหลังลบข้อมูลทั้งหมด) · ไม่ย้อนไปสรุปวันที่เก่ากว่าสรุปล่าสุด (เพิ่งเลื่อนเวลาสรุป)
-  if (date < businessDay(Date.parse(couple.created_at), couple.settle_time)) return skip
-  if ((repo.latestSummary(couple.id)?.date ?? '') > date) return skip
+  const first = businessDay(Date.parse(couple.created_at), couple.settle_time)
+  if (date < first) return skip
+  const latest = repo.latestSummary(couple.id)?.date
+  if ((latest ?? '') > date) return skip
+  // วันที่ขาดสรุป (เครื่องหลับข้ามเวลาสรุปหลายรอบ) → สรุปเงียบเป็น "ทบ" ให้ยอดยกต่อกันครบ แล้วส่งการ์ดเฉพาะวันล่าสุด (ยอดยกมารวมไว้แล้ว)
+  // ไม่ทำ = รายการของวันที่ขาดหลุดจากยอด เพราะ ledger ยกยอดจากสรุปล่าสุดเท่านั้น
+  for (let d = latest ? addDays(latest, 1) : first; d < date; d = addDays(d, 1)) {
+    const l = repo.ledger(couple.id, d)
+    repo.createSummary({ coupleId: couple.id, date: d, net: l.net, carriedIn: l.carriedIn, action: 'carry', createdAt: new Date(ctx.now()).toISOString() })
+  }
 
   let s = repo.summary(couple.id, date)
   const ledger = repo.ledger(couple.id, date)
