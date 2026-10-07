@@ -7,7 +7,7 @@ export const STALE_SLIP_HOURS = 24
 export const PENDING_ANSWER_HOURS = 24
 
 /** payment gateway: ชื่อบนสลิปเป็นตัวกลาง ไม่ใช่ร้านจริง (แหล่งเดียว เทียบแบบไม่สนตัวพิมพ์/ช่องว่าง) */
-export const GATEWAYS = ['2C2P', 'KShop', 'TrueMoney', 'Rabbit LINE Pay', 'LINE Pay', 'ShopeePay', 'Omise', 'GB Prime Pay', 'Ksher', 'Pay Solutions', 'ChillPay']
+export const GATEWAYS = ['2C2P', 'KShop', 'TrueMoney', 'ทรูมันนี่', 'Rabbit LINE Pay', 'LINE Pay', 'ShopeePay', 'Omise', 'GB Prime Pay', 'Ksher', 'Pay Solutions', 'ChillPay']
 /** คำที่บอกว่าเป็นการเติมเงินเข้า e-wallet ของตัวเอง (แหล่งเดียว) */
 export const TOPUP_WORDS = ['เติมเงิน', 'top up', 'topup', 'top-up', 'wallet', 'วอลเล็ท']
 
@@ -42,11 +42,23 @@ export function nameMatches(slipName: string | null, m: Member): boolean {
   return candidates.some((c) => firstName(c) === n)
 }
 
-/** เป็นคนนี้ในคู่ไหม: ชื่อต้นตรง **และ** ถ้าตั้งเลขท้ายบัญชีไว้ เลขท้ายบนสลิปต้องตรงด้วย (กันโอนให้คนชื่อซ้ำ) */
+const suffixesOf = (m: Member) => JSON.parse(m.account_suffixes || '[]') as string[]
+const last4 = (n: string | null | undefined) => (n && n.length >= 4 ? n.slice(-4) : null)
+
+/** เลขท้าย 4 หลักทุกบัญชีที่สมาชิกตั้งไว้: เลขท้ายบัญชี + พร้อมเพย์ + บัญชีรับเงิน (สลิปโชว์แค่เลขท้ายแบบปิดบัง) */
+export function knownAccounts(m: Member): string[] {
+  return [...new Set([...suffixesOf(m), last4(m.promptpay_id), last4(m.bank_account)].filter((x): x is string => !!x))]
+}
+
+/** เลขบัญชีบนสลิปขัดกับที่ตั้งไว้: ตั้งเลขท้ายบัญชีไว้ (= รายการบัญชีครบ) แต่เลขบนสลิปไม่อยู่ในบัญชีที่รู้จัก */
+function accountConflicts(account: string | null, m: Member) {
+  return !!account && suffixesOf(m).length > 0 && !knownAccounts(m).includes(account)
+}
+
+/** เป็นคนนี้ในคู่ไหม: ชื่อต้นตรง **และ** ถ้าตั้งเลขท้ายบัญชีไว้ เลขท้ายบนสลิปต้องเป็นบัญชีของเขา (กันโอนให้คนชื่อซ้ำ) */
 export function isMember(slipName: string | null, account: string | null, m: Member): boolean {
   if (!nameMatches(slipName, m)) return false
-  const suffixes = JSON.parse(m.account_suffixes || '[]') as string[]
-  return !suffixes.length || (!!account && suffixes.includes(account))
+  return !suffixesOf(m).length || (!!account && knownAccounts(m).includes(account))
 }
 
 const squash = (s: string | null | undefined) => (s ?? '').toLowerCase().replace(/\s+/g, '')
@@ -55,6 +67,21 @@ export function findGateway(s: string | null | undefined): string | null {
   return (t && GATEWAYS.find((g) => t.includes(squash(g)))) || null
 }
 const isTopup = (s: string | null | undefined) => !!s && TOPUP_WORDS.some((w) => squash(s).includes(squash(w)))
+
+/**
+ * โอนเข้าบัญชีตัวเอง / เติม e-wallet ตัวเอง · ตัดสินจากตัวตนผู้รับก่อน คำบนสลิปและคำตอบ AI ใช้เฉพาะเมื่อผู้รับไม่มีชื่อคน/ร้าน
+ * - ผู้รับมีชื่อ (คนหรือร้าน) → ตัวเองเฉพาะเมื่อชื่อเดียวกับผู้โอน และเลขบัญชีไม่ขัดกับที่ตั้งไว้ของผู้ส่งรูป
+ *   (ร้านที่รับเงินผ่านพร้อมเพย์ e-Wallet ทำให้ AI ตอบ topup / สลิปมีคำว่า wallet ได้ จึงไม่ใช้สัญญาณพวกนั้นตรงนี้)
+ * - ผู้รับไม่มีชื่อ หรือเป็นผู้ให้บริการ wallet (gateway) → ตัวเองเมื่อเลขบัญชีตรงบัญชีที่ตั้งไว้ หรือมีสัญญาณเติมเงิน
+ */
+export function isSelfTransfer(ai: SlipAi, poster: Member): boolean {
+  const receiver = firstName(ai.receiver_name)
+  if (receiver && !findGateway(ai.receiver_name)) {
+    return receiver === firstName(ai.sender_name) && !accountConflicts(ai.receiver_account, poster)
+  }
+  const ownAccount = !!ai.receiver_account && knownAccounts(poster).includes(ai.receiver_account)
+  return ownAccount || ai.receiver_kind === 'topup' || isTopup(ai.receiver_name) || isTopup(ai.merchant)
+}
 
 /** สลิปเก่ากว่า hours ชม. หรือไม่มีวันที่ · hours = 0 ปิด · วันที่ในอนาคต (นาฬิกาเพี้ยน) ไม่นับว่าเก่า */
 export function isStale(datetime: string | null, now: number, hours: number) {
@@ -76,14 +103,7 @@ export function classify(ai: SlipAi, poster: Member, members: Member[], opts: { 
   if (opts.now !== undefined && isStale(ai.datetime, opts.now, opts.staleHours ?? STALE_SLIP_HOURS)) return { kind: 'stale', amount }
 
   if (ai.type === 'transfer_slip') {
-    const sender = firstName(ai.sender_name)
-    const receiver = firstName(ai.receiver_name)
-    // ร้านที่รับเงินผ่านพร้อมเพย์ e-Wallet ทำให้ AI ตอบ topup / มีคำว่า wallet ได้ → เชื่อว่าเติมเงินเฉพาะเมื่อผู้รับไม่มีชื่อ หรือเป็นบริษัท wallet (gateway)
-    const namesOther = !!receiver && !findGateway(ai.receiver_name)
-    const topupHint = ai.receiver_kind === 'topup' || isTopup(ai.receiver_name) || isTopup(ai.merchant)
-    if ((sender && sender === receiver) || (topupHint && !namesOther)) {
-      return { kind: 'self', rule: 'self', amount, merchant: SELF_MERCHANT, ask }
-    }
+    if (isSelfTransfer(ai, poster)) return { kind: 'self', rule: 'self', amount, merchant: SELF_MERCHANT, ask }
     if (other) {
       if (isMember(ai.receiver_name, ai.receiver_account, other)) return { kind: 'settlement', rule: 'partner', amount, from: poster, to: other, ask }
       // คนรับเป็นคนส่งรูปเข้ากลุ่มเอง

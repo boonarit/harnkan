@@ -15,7 +15,7 @@ import { handleEvent } from '../src/line/router.ts'
 import type { OutboxItem } from '../src/line/client.ts'
 import { runSummary } from '../src/jobs/summary.ts'
 import { makeServer } from '../src/server.ts'
-import { classify, isStale } from '../src/slip/classify.ts'
+import { classify, isSelfTransfer, isStale, knownAccounts } from '../src/slip/classify.ts'
 import { normalize, type SlipAi } from '../src/slip/vision.ts'
 import { makeSlipPng } from './fixtures/make-slip.ts'
 import { A_ID, B_ID, ev, listen, makeCtx } from './helpers/app.ts'
@@ -166,6 +166,22 @@ test('จ่ายร้านผ่านพร้อมเพย์ e-Wallet (
   await slip(B_ID, { amount: 80, sender_name: 'น.ส. บี ส.', receiver_name: 'นาย ซี ท.', merchant: 'e-Wallet' })
   assert.equal(counts().expenses, 2)
   assert.equal(net(), -10000)
+})
+
+test('isSelfTransfer: ใช้บัญชีที่ตั้งไว้ (พร้อมเพย์/เลขท้าย) ก่อนคำบนสลิป', () => {
+  const m = (p: Partial<any> = {}) => ({ id: 2, couple_id: 1, line_user_id: 'U_fake_b', display_name: 'บี', promptpay_id: '0800000002', bank_names: '[]', account_suffixes: '[]', ...p })
+  const ai = (p: Partial<SlipAi>) => normalize({ type: 'transfer_slip', amount: 1, sender_name: 'น.ส. บี ส.', confidence: 1, ...p })
+  // ร้านรับผ่าน e-Wallet: AI ตอบ topup ก็ไม่ใช่เติมเงิน
+  assert.equal(isSelfTransfer(ai({ receiver_name: 'ร้านก๋วยเตี๋ยว', receiver_kind: 'topup', receiver_account: 'xxx-1234' }), m()), false)
+  // ผู้รับไม่มีชื่อ เลขท้ายตรงพร้อมเพย์ของตัวเอง → โอนเข้าตัวเอง
+  assert.equal(isSelfTransfer(ai({ receiver_name: null, receiver_account: 'xxx-xxx-0002' }), m()), true)
+  assert.equal(isSelfTransfer(ai({ receiver_name: null, receiver_account: 'xxx-xxx-9999', receiver_kind: 'shop' }), m()), false)
+  // ชื่อเดียวกับผู้โอน แต่ตั้งเลขท้ายไว้แล้วเลขไม่ตรง → คนชื่อซ้ำ ไม่ใช่ตัวเอง · ตรงพร้อมเพย์ → ตัวเอง
+  assert.equal(isSelfTransfer(ai({ receiver_name: 'น.ส. บี ท.', receiver_account: 'xxx-9999' }), m({ account_suffixes: '["1111"]' })), false)
+  assert.equal(isSelfTransfer(ai({ receiver_name: 'น.ส. บี ท.', receiver_account: 'xxx-0002' }), m({ account_suffixes: '["1111"]' })), true)
+  // เติมผ่านผู้ให้บริการ wallet
+  assert.equal(isSelfTransfer(ai({ receiver_name: 'ทรูมันนี่', receiver_kind: 'topup' }), m()), true)
+  assert.deepEqual(knownAccounts(m({ account_suffixes: '["1111"]', bank_account: '0000000003' })), ['1111', '0002', '0003'])
 })
 
 // ---------- (ง) โอนให้บุคคลที่ 3 ----------
