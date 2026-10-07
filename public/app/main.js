@@ -83,15 +83,22 @@ async function viewToday() {
     ${t.settlements?.length ? `<h2>การโอนวันนี้</h2><ul class="list" data-testid="settlements">${t.settlements.map(settlementRow).join('')}</ul>` : ''}
     ${t.ignored_slips?.length ? `<h2>สลิปที่ไม่นับ</h2><ul class="list" data-testid="ignored">${t.ignored_slips.map((s) => `<li><div class="row">
       <span class="main"><span class="title">${esc(s.label)}</span><span class="meta">${name(s.member_id)}ส่ง · ไม่นับเข้ายอด</span></span>
-      <span class="amt">${baht(s.amount)}</span><button type="button" class="secondary small" data-count="${s.id}">นับ</button></div></li>`).join('')}</ul>` : ''}
+      <span class="amt">${baht(s.amount)}</span><button type="button" class="secondary small" data-count="${s.id}">นับ</button>
+      <button type="button" class="danger small" data-dismiss="${s.id}" aria-label="ลบสลิป ${baht(s.amount)}">ลบ</button></div></li>`).join('')}</ul>` : ''}
     <a class="btn fab" href="#/add">＋ เพิ่มรายการ</a>`
   onSettlementDelete($app(), route) // route() สร้าง #app ใหม่ กัน listener ซ้อน
   $app().querySelector('[data-testid=ignored]')?.addEventListener('click', async (ev) => {
-    const b = /** @type {HTMLElement} */ (ev.target).closest('[data-count]')
+    const b = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (ev.target).closest('[data-count],[data-dismiss]'))
     if (!b) return
     try {
-      await api.countSlip(Number(/** @type {HTMLElement} */ (b).dataset.count))
-      toast('นับเป็นค่าใช้จ่ายแล้ว')
+      if (b.dataset.dismiss) {
+        if (!confirm('ลบสลิปนี้ออกจากรายการ? ยอดไม่เปลี่ยน')) return
+        await api.dismissSlip(Number(b.dataset.dismiss))
+        toast('ลบแล้ว')
+      } else {
+        await api.countSlip(Number(b.dataset.count))
+        toast('นับเป็นค่าใช้จ่ายแล้ว')
+      }
       await route()
     } catch (e) {
       showError(/** @type {Error} */ (e).message)

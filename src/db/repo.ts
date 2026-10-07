@@ -28,7 +28,7 @@ export type Slip = {
   id: number; couple_id: number; member_id: number; image_path: string | null; qr_trans_ref: string | null; bank: string | null
   amount_satang: number | null; sender_name: string | null; receiver_name: string | null; ai_json: string | null
   confidence: number | null; kind: 'expense' | 'settlement' | 'unknown'; status: 'pending' | 'await_amount' | 'done'; created_at: string
-  rule: string | null; ignored: number // ignored=1 → "ไม่นับ" (ย้อนได้ สลิปยังอยู่)
+  rule: string | null; ignored: number // ignored=1 → "ไม่นับ" (โชว์ในแอป กดนับได้) · 2 → ลบแล้ว (ไม่โชว์ ไม่นับ)
 }
 export type Summary = {
   id: number; couple_id: number; date: string; net_satang: number; carried_in: number; paid_satang: number
@@ -270,7 +270,7 @@ export class Repo {
       const before = this.expense(id)
       if (!before || before.status !== 'active') throw new Error('ไม่พบรายการ')
       this.run("UPDATE expenses SET status = 'deleted' WHERE id = ?", id)
-      if (before.slip_id) this.run('UPDATE slips SET ignored = 1 WHERE id = ?', before.slip_id) // สลิปกลับเป็น "ไม่นับ" กดนับใหม่ได้
+      if (before.slip_id) this.run('UPDATE slips SET ignored = 2 WHERE id = ?', before.slip_id) // ลบ = หายจริง ไม่กลับไปโผล่ใน "สลิปที่ไม่นับ" · "ไม่นับ" ตั้ง 1 เองหลังเรียก
       this.adjustIfClosed(before, null, today, 'ลบรายการของวันที่ปิดยอดแล้ว')
       const after = this.expense(id)!
       this.audit(before.couple_id, 'expense', id, memberId, 'delete', before, after)
@@ -363,7 +363,7 @@ export class Repo {
       const ms = this.members(before.couple_id)
       const signed = ms[1]?.id === before.from_member ? before.amount_satang : -before.amount_satang // ผลต่อ paid ของสรุป = −ผลต่อ N
       this.run("UPDATE settlements SET status = 'deleted' WHERE id = ?", id)
-      if (before.slip_id) this.run('UPDATE slips SET ignored = 1 WHERE id = ?', before.slip_id)
+      if (before.slip_id) this.run('UPDATE slips SET ignored = 2 WHERE id = ?', before.slip_id)
       let adjust = false
       const s = before.summary_id ? this.summaryById(before.summary_id) : undefined
       if (s) {

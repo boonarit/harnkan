@@ -160,6 +160,14 @@ test('(ค) เติมเงิน e-wallet / โอนเข้าบัญ�
   assert.equal(counts().expenses, 1)
 })
 
+test('จ่ายร้านผ่านพร้อมเพย์ e-Wallet (AI ตอบ topup / มีคำว่า wallet) แต่ผู้รับเป็นคนอื่น → ค่าใช้จ่าย ไม่ใช่เติมเงิน', async () => {
+  const { slip, net, counts } = await setup()
+  await slip(B_ID, { amount: 120, sender_name: 'น.ส. บี ส.', receiver_name: 'ร้านก๋วยเตี๋ยวเรือ', receiver_kind: 'topup', merchant: 'ก๋วยเตี๋ยว' })
+  await slip(B_ID, { amount: 80, sender_name: 'น.ส. บี ส.', receiver_name: 'นาย ซี ท.', merchant: 'e-Wallet' })
+  assert.equal(counts().expenses, 2)
+  assert.equal(net(), -10000)
+})
+
 // ---------- (ง) โอนให้บุคคลที่ 3 ----------
 test('(ง) โอนให้บุคคลอื่น → expense อัตโนมัติ · merchant ไม่มีชื่อบุคคล (grep ทั้งตาราง expenses + audit_log)', async () => {
   const { slip, tap, repo, couple, net } = await setup()
@@ -326,6 +334,20 @@ test('API: นับสลิปที่ไม่นับทีหลังไ
     const c = await api(A_ID, 'POST', `/api/slips/${today.ignored_slips[0].id}/count`)
     assert.deepEqual([c.status, c.body.net], [200, 25000 - 10000])
     assert.equal((await api(A_ID, 'POST', `/api/slips/${today.ignored_slips[0].id}/count`)).status, 404, 'นับแล้วนับซ้ำไม่ได้')
+    // นับแล้วลบรายการ → หายจริง ไม่กลับไปโผล่ใน "สลิปที่ไม่นับ"
+    const counted = (await api(A_ID, 'GET', '/api/today')).body.expenses.find((e: any) => e.slip_id === today.ignored_slips[0].id)
+    assert.equal((await api(A_ID, 'DELETE', `/api/expenses/${counted.id}`)).status, 200)
+    assert.deepEqual((await api(A_ID, 'GET', '/api/today')).body.ignored_slips, [])
+    // สลิปที่ไม่นับ กดลบออกจากรายการได้ · ยอดไม่เปลี่ยน · ลบซ้ำ/นับหลังลบไม่ได้
+    await t.slip(A_ID, { amount: 200, sender_name: 'นาย เอ ส.', receiver_name: 'TrueMoney Wallet' })
+    const ign = (await api(A_ID, 'GET', '/api/today')).body
+    assert.equal(ign.ignored_slips.length, 1)
+    const d = await api(A_ID, 'POST', `/api/slips/${ign.ignored_slips[0].id}/dismiss`)
+    assert.equal(d.status, 200)
+    const after = (await api(A_ID, 'GET', '/api/today')).body
+    assert.deepEqual([after.ignored_slips, after.net], [[], ign.net])
+    assert.equal((await api(A_ID, 'POST', `/api/slips/${ign.ignored_slips[0].id}/dismiss`)).status, 404)
+    assert.equal((await api(A_ID, 'POST', `/api/slips/${ign.ignored_slips[0].id}/count`)).status, 404)
     assert.equal((await api(A_ID, 'PATCH', '/api/settings', { account_suffixes: ['12a4'] })).status, 400)
     assert.equal((await api(A_ID, 'PATCH', '/api/settings', { stale_slip_hours: -1 })).status, 400)
     const ok = await api(A_ID, 'PATCH', '/api/settings', { account_suffixes: ['1234', '5678'], stale_slip_hours: 48 })

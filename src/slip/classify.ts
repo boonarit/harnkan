@@ -77,7 +77,11 @@ export function classify(ai: SlipAi, poster: Member, members: Member[], opts: { 
 
   if (ai.type === 'transfer_slip') {
     const sender = firstName(ai.sender_name)
-    if ((sender && sender === firstName(ai.receiver_name)) || ai.receiver_kind === 'topup' || isTopup(ai.receiver_name) || isTopup(ai.merchant)) {
+    const receiver = firstName(ai.receiver_name)
+    // ร้านที่รับเงินผ่านพร้อมเพย์ e-Wallet ทำให้ AI ตอบ topup / มีคำว่า wallet ได้ → เชื่อว่าเติมเงินเฉพาะเมื่อผู้รับไม่มีชื่อ หรือเป็นบริษัท wallet (gateway)
+    const namesOther = !!receiver && !findGateway(ai.receiver_name)
+    const topupHint = ai.receiver_kind === 'topup' || isTopup(ai.receiver_name) || isTopup(ai.merchant)
+    if ((sender && sender === receiver) || (topupHint && !namesOther)) {
       return { kind: 'self', rule: 'self', amount, merchant: SELF_MERCHANT, ask }
     }
     if (other) {

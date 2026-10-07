@@ -38,7 +38,7 @@ export const SLIP_TOOL = {
       receiver_name: { ...nullable('string'), description: 'ชื่อผู้รับ/ร้านตามที่เห็นบนสลิป' },
       sender_account: { ...nullable('string'), description: 'เลขบัญชี/พร้อมเพย์ของผู้โอนแบบปิดบังตามที่เห็น เช่น "xxx-xxx-1234"' },
       receiver_account: { ...nullable('string'), description: 'เลขบัญชี/พร้อมเพย์ของผู้รับแบบปิดบังตามที่เห็น เช่น "xxx-x-x5678-x"' },
-      receiver_kind: { type: ['string', 'null'], enum: ['person', 'shop', 'topup', null], description: 'person = โอนให้บุคคล, shop = จ่ายร้าน/บริษัท/ผ่าน payment gateway, topup = เติมเงินเข้า e-wallet หรือบัญชีของผู้โอนเอง' },
+      receiver_kind: { type: ['string', 'null'], enum: ['person', 'shop', 'topup', null], description: 'person = โอนให้บุคคล, shop = จ่ายร้าน/บริษัท/ผ่าน payment gateway, topup = เติมเงินเข้า e-wallet หรือบัญชีของผู้โอนเอง (ผู้รับคือผู้โอนเองหรือบริษัท wallet) · จ่ายร้าน/คนอื่นผ่านพร้อมเพย์ e-Wallet ไม่ใช่ topup' },
       merchant: { ...nullable('string'), description: 'ชื่อสั้นๆ ของรายการ/ร้าน ภาษาไทยถ้าได้ เช่น "กาแฟ" "7-Eleven"' },
       items: { type: 'array', items: { type: 'string' }, description: 'รายการสินค้า (ถ้ามี)' },
       category: { ...nullable('string'), description: 'หมวด เช่น อาหาร เดินทาง ของใช้' },

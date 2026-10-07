@@ -5,7 +5,7 @@
 //
 // เมธอด: me() · today() · days(month) · day(date) · expense(id) · addExpense(body) · updateExpense(id, patch)
 //        deleteExpense(id) · saveSettings(patch) · settleQr() · slipImage(id)
-//        deleteSettlement(id) · closeBalance() · countSlip(id) · wipeInfo() · wipeAll(confirm)
+//        deleteSettlement(id) · closeBalance() · countSlip(id) · dismissSlip(id) · wipeInfo() · wipeAll(confirm)
 import { dailyNet } from '#domain/balance.js'
 import { effect, splitShares, treaterOf } from '#domain/split.js'
 import { businessDay } from '#domain/time.js'
@@ -78,6 +78,8 @@ export class ApiAdapter {
   closeBalance() { return this.call('POST', '/settle/close') }
   /** @param {number} id สลิปที่ไม่นับ → นับเป็นค่าใช้จ่าย */
   countSlip(id) { return this.call('POST', `/slips/${id}/count`) }
+  /** @param {number} id สลิปที่ไม่นับ → ลบออกจากรายการ */
+  dismissSlip(id) { return this.call('POST', `/slips/${id}/dismiss`) }
   wipeInfo() { return this.call('GET', '/wipe') }
   /** @param {string} confirm ต้องเป็น "ลบ" */
   wipeAll(confirm) { return this.call('POST', '/wipe', { confirm }) }
@@ -284,6 +286,8 @@ export class LocalAdapter {
   }
   /** @param {number} _id */
   async countSlip(_id) { throw new ApiError(404, 'เดโมไม่มีสลิป') }
+  /** @param {number} _id */
+  async dismissSlip(_id) { throw new ApiError(404, 'เดโมไม่มีสลิป') }
   async wipeInfo() {
     const s = this.state
     return { expenses: s.expenses.length, settlements: s.settlements.length, slips: 0, summaries: s.settled_days.length }

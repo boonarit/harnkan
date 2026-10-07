@@ -173,9 +173,15 @@ export async function handleApi(ctx: Ctx, req: IncomingMessage, res: ServerRespo
   }
   if (M === 'POST' && (m = p.match(/^\/api\/slips\/(\d{1,12})\/count$/))) {
     const s = repo.slip(Number(m[1]))
-    if (!s || s.couple_id !== a.couple.id || !s.ignored || !s.amount_satang) throw new HttpError(404, 'ไม่พบสลิปที่ไม่นับ')
+    if (!s || s.couple_id !== a.couple.id || s.ignored !== 1 || !s.amount_satang) throw new HttpError(404, 'ไม่พบสลิปที่ไม่นับ')
     fixSlip(ctx, a, s, 'count', a.member.id)
     return send(res, 200, { net: repo.ledger(a.couple.id, today).net }), true
+  }
+  if (M === 'POST' && (m = p.match(/^\/api\/slips\/(\d{1,12})\/dismiss$/))) {
+    const s = repo.slip(Number(m[1]))
+    if (!s || s.couple_id !== a.couple.id || s.ignored !== 1) throw new HttpError(404, 'ไม่พบสลิปที่ไม่นับ')
+    repo.updateSlip(s.id, { ignored: 2 })
+    return send(res, 200, { ok: true }), true
   }
   if (p === '/api/wipe') {
     if (M === 'GET') return send(res, 200, repo.wipeCounts(a.couple.id)), true
