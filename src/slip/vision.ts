@@ -35,7 +35,7 @@ export const SLIP_TOOL = {
       amount: { ...nullable('number'), description: 'ยอดเงินรวมเป็นบาท เช่น 347.5 · อ่านไม่ได้ให้เป็น null' },
       datetime: { ...nullable('string'), description: 'วันเวลาบนสลิป ISO 8601 ปี ค.ศ. เวลาไทย (+07:00) · สลิปไทยมักพิมพ์ปี พ.ศ. ให้ลบ 543 · ไม่เห็นวันที่ให้เป็น null' },
       sender_name: { ...nullable('string'), description: 'ชื่อผู้โอนตามที่เห็นบนสลิป' },
-      receiver_name: { ...nullable('string'), description: 'ชื่อผู้รับ/ร้านตามที่เห็นบนสลิป' },
+      receiver_name: { ...nullable('string'), description: 'ชื่อผู้รับ/ร้านตามที่เห็นบนสลิป · สลิปเติมเงินพร้อมเพย์/e-Wallet ให้ใช้ชื่อเจ้าของ wallet จาก "ข้อมูลเพิ่มเติมจากผู้ให้บริการ" ไม่ใช่คำว่า "เติมเงินพร้อมเพย์"' },
       sender_account: { ...nullable('string'), description: 'เลขบัญชี/พร้อมเพย์ของผู้โอนแบบปิดบังตามที่เห็น เช่น "xxx-xxx-1234"' },
       receiver_account: { ...nullable('string'), description: 'เลขบัญชี/พร้อมเพย์ของผู้รับแบบปิดบังตามที่เห็น เช่น "xxx-x-x5678-x"' },
       receiver_kind: { type: ['string', 'null'], enum: ['person', 'shop', 'topup', null], description: 'person = โอนให้บุคคล, shop = จ่ายร้าน/บริษัท/ผ่าน payment gateway, topup = เติมเงินเข้า e-wallet หรือบัญชีของผู้โอนเอง (ผู้รับคือผู้โอนเองหรือบริษัท wallet) · จ่ายร้าน/คนอื่นผ่านพร้อมเพย์ e-Wallet ไม่ใช่ topup' },

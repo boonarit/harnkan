@@ -242,7 +242,8 @@ export function fixSlip(ctx: Ctx, who: Who, slip: Slip, op: FixOp, actor: number
     paidBy = rec.row.from_member
     repo.deleteSettlement(rec.row.id, actor, day)
   } else if (c?.kind === 'settlement') paidBy = c.from.id
-  const merchant = c?.kind === 'expense' || c?.kind === 'self' ? c.merchant : c?.kind === 'settlement' ? PERSON_MERCHANT : ai?.merchant || 'สลิป'
+  // สลิปที่ระบบเคยจัดเป็นเติมเงิน แล้วคนกดนับ → ไม่ใช้ป้าย "เติมเงิน/โอนเข้าบัญชีตัวเอง" เป็นชื่อรายการ
+  const merchant = c?.kind === 'expense' ? c.merchant : c?.kind === 'settlement' ? PERSON_MERCHANT : ai?.merchant || 'สลิป'
   const category = c?.kind === 'expense' ? c.category : null
   repo.updateSlip(slip.id, { status: 'done', ignored: 0 })
   const e = createSlipExpense(ctx, who, slip, paidBy, amount, merchant, category, mode, actor)

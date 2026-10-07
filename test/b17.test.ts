@@ -147,7 +147,7 @@ test('เลขท้ายบัญชีตั้งไว้แต่สล�
 
 // ---------- (ค) เติมเงิน / โอนเข้าตัวเอง ----------
 test('(ค) เติมเงิน e-wallet / โอนเข้าบัญชีตัวเอง → ไม่นับอัตโนมัติ · กด "นับเป็นค่าใช้จ่าย" แล้วยอดเปลี่ยน', async () => {
-  const { slip, tap, net, counts } = await setup()
+  const { slip, tap, net, counts, repo, couple } = await setup()
   const out = await slip(A_ID, { amount: 500, sender_name: 'นาย เอ ส.', receiver_name: 'TrueMoney Wallet', receiver_kind: null })
   assert.match(txt(out), /ไม่นับเข้ายอด/)
   assert.equal(net(), 0)
@@ -158,6 +158,7 @@ test('(ค) เติมเงิน e-wallet / โอนเข้าบัญ�
   await tap(A_ID, tapData(out, 'นับเป็นค่าใช้จ่าย'))
   assert.equal(net(), 25000)
   assert.equal(counts().expenses, 1)
+  assert.notEqual(repo.expensesByDay(couple.id, DAY)[0].merchant, 'เติมเงิน/โอนเข้าบัญชีตัวเอง', 'กดนับแล้วชื่อรายการไม่ใช่ป้ายเติมเงิน')
 })
 
 test('จ่ายร้านผ่านพร้อมเพย์ e-Wallet (AI ตอบ topup / มีคำว่า wallet) แต่ผู้รับเป็นคนอื่น → ค่าใช้จ่าย ไม่ใช่เติมเงิน', async () => {
@@ -179,6 +180,10 @@ test('isSelfTransfer: ใช้บัญชีที่ตั้งไว้ (�
   // ชื่อเดียวกับผู้โอน แต่ตั้งเลขท้ายไว้แล้วเลขไม่ตรง → คนชื่อซ้ำ ไม่ใช่ตัวเอง · ตรงพร้อมเพย์ → ตัวเอง
   assert.equal(isSelfTransfer(ai({ receiver_name: 'น.ส. บี ท.', receiver_account: 'xxx-9999' }), m({ account_suffixes: '["1111"]' })), false)
   assert.equal(isSelfTransfer(ai({ receiver_name: 'น.ส. บี ท.', receiver_account: 'xxx-0002' }), m({ account_suffixes: '["1111"]' })), true)
+  // สลิป SCB "เติมเงินพร้อมเพย์" เข้า e-Wallet ของร้าน: เจ้าของ wallet เป็นคนอื่น → ไม่ใช่ตัวเอง · ป้ายอย่างเดียวก็ไม่ใช่ตัวเอง · wallet ของตัวเอง → ตัวเอง
+  assert.equal(isSelfTransfer(ai({ receiver_name: 'น.ส. ซี ส. (K Plus W)', receiver_kind: 'topup', receiver_account: '000000000000009' }), m()), false)
+  assert.equal(isSelfTransfer(ai({ receiver_name: 'เติมเงินพร้อมเพย์', receiver_kind: 'topup', receiver_account: '000000000000009' }), m()), false)
+  assert.equal(isSelfTransfer(ai({ receiver_name: 'น.ส. บี ส. (K Plus W)', receiver_kind: 'topup', receiver_account: '000000000000009' }), m()), true)
   // เติมผ่านผู้ให้บริการ wallet
   assert.equal(isSelfTransfer(ai({ receiver_name: 'ทรูมันนี่', receiver_kind: 'topup' }), m()), true)
   assert.deepEqual(knownAccounts(m({ account_suffixes: '["1111"]', bank_account: '0000000003' })), ['1111', '0002', '0003'])
