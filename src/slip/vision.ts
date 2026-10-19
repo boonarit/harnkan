@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
 import { Jimp } from 'jimp'
+import { bangkokDate } from '../domain/time.js'
 
 export type SlipAi = {
   type: 'transfer_slip' | 'receipt' | 'other'
@@ -50,6 +51,11 @@ export const SLIP_TOOL = {
 
 const MAX_SIDE = 1568
 const PROMPT = 'อ่านรูปนี้ (สลิปโอนเงินหรือใบเสร็จในไทย) แล้วบันทึกด้วย record_slip · ถ้าไม่ใช่สลิป/ใบเสร็จให้ type=other · อย่าเดายอดที่มองไม่เห็น'
+/** บอกวันนี้ให้ AI (ไม่บอกแล้วเดาปีบนสลิปเป็น 2024 · โค้ดยังแก้ปีซ้ำใน slipTime) */
+export function slipPrompt(now = Date.now()) {
+  const d = bangkokDate(now)
+  return `${PROMPT} · วันนี้คือ ${d} (พ.ศ. ${Number(d.slice(0, 4)) + 543}) · ปีบนสลิปเป็น พ.ศ. ให้ลบ 543`
+}
 
 /** ย่อด้านยาวไม่เกิน 1568px → JPEG base64 (ใช้ร่วม Claude/Gemini) */
 async function toJpegBase64(image: Buffer) {
@@ -77,7 +83,7 @@ export class ClaudeSlipReader implements SlipReader {
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } },
-          { type: 'text', text: PROMPT },
+          { type: 'text', text: slipPrompt() },
         ],
       }],
     })
@@ -127,7 +133,7 @@ export class GeminiSlipReader implements SlipReader {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'image/jpeg', data } }, { text: PROMPT.replace('ด้วย record_slip', 'เป็น JSON ตาม schema') }] }],
+        contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'image/jpeg', data } }, { text: slipPrompt().replace('ด้วย record_slip', 'เป็น JSON ตาม schema') }] }],
         generationConfig: { responseMimeType: 'application/json', responseSchema: geminiSchema(SLIP_TOOL.input_schema), temperature: 0 },
       }),
       signal: AbortSignal.timeout(60_000),

@@ -1,5 +1,6 @@
 import type { Member } from '../db/repo.ts'
 import type { SlipAi } from './vision.ts'
+import { bangkokDate } from '../domain/time.js'
 
 export const MIN_CONFIDENCE = 0.8
 /** ค่าเริ่มต้นเมื่อคู่ยังไม่ได้ตั้งเอง (couples.stale_slip_hours / pending_answer_hours) · stale 0 = ปิดการถามสลิปเก่า */
@@ -83,10 +84,25 @@ export function isSelfTransfer(ai: SlipAi, poster: Member): boolean {
   return ownAccount || ai.receiver_kind === 'topup' || isTopup(ai.receiver_name) || isTopup(ai.merchant)
 }
 
+/**
+ * เวลาบนสลิป (ms) · AI มักอ่านปีผิด (ได้ 2024 ทั้งที่สลิปพิมพ์ 2569 หรือไม่ลบ 543) แต่วัน/เดือน/เวลาถูก
+ * → ปีไม่ตรงปีไทยปัจจุบันให้ใช้ปีปัจจุบัน ถ้าออกมาเป็นอนาคตเกิน 1 วันใช้ปีที่แล้ว (สลิป 31 ธ.ค. ส่งวันที่ 1 ม.ค.)
+ * ponytail: ใบเสร็จที่เก่าเป็นปีจริงจะถูกมองเป็นปีนี้ ซึ่งไม่น่าเกิดในการใช้งานจริง
+ */
+export function slipTime(datetime: string | null, now: number) {
+  const t = datetime ? Date.parse(datetime) : NaN
+  const m = datetime?.match(/^(\d{4})(-.*)$/)
+  if (Number.isNaN(t) || !m) return t
+  const year = Number(bangkokDate(now).slice(0, 4))
+  if (Number(m[1]) === year) return t
+  const fixed = Date.parse(`${year}${m[2]}`)
+  return fixed - now > 86400_000 ? Date.parse(`${year - 1}${m[2]}`) : fixed
+}
+
 /** สลิปเก่ากว่า hours ชม. หรือไม่มีวันที่ · hours = 0 ปิด · วันที่ในอนาคต (นาฬิกาเพี้ยน) ไม่นับว่าเก่า */
 export function isStale(datetime: string | null, now: number, hours: number) {
   if (hours <= 0) return false
-  const t = datetime ? Date.parse(datetime) : NaN
+  const t = slipTime(datetime, now)
   return Number.isNaN(t) || now - t > hours * 3600_000
 }
 
